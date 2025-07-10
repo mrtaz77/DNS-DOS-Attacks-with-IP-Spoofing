@@ -5,13 +5,16 @@ A comprehensive DNS server implementation supporting primary/secondary architect
 ## ✅ Features Implemented
 
 - **Multi-Server Architecture**: Primary/Secondary with automatic synchronization
+- **DNS Gateway & Load Balancing**: Enterprise-grade proxy with round-robin load balancing
 - **Zone Transfers**: AXFR (full) and IXFR (incremental) zone transfers
 - **DNS Updates**: Dynamic updates with TSIG authentication and forwarding
 - **Multiple Protocols**: UDP, TCP, DNS-over-TLS (DoT), DNS-over-HTTPS (DoH)
 - **Security**: TSIG authentication, ACLs, secure zone transfers
 - **Rate Limiting & DOS Protection**: Configurable rate limiting with IP banning
+- **Health Monitoring**: Automatic backend server health checks and failover
 - **Record Types**: A, MX, SOA, NS, CNAME, TXT records
 - **Caching**: DNS response caching with TTL management
+- **Statistics & Metrics**: Comprehensive monitoring and performance metrics
 
 ## 🚀 Quick Start
 
@@ -19,6 +22,19 @@ A comprehensive DNS server implementation supporting primary/secondary architect
 ```bash
 # Run comprehensive test demonstrating full architecture
 ./test_multi_server_architecture.sh
+```
+
+### DNS Gateway with Load Balancing Test
+```bash
+# Test the new DNS Gateway functionality
+./test_dns_gateway.sh
+```
+
+### Interactive Architecture Manager
+```bash
+# Use the comprehensive architecture manager
+python dns_architecture_manager.py --mode demo      # Run automated demo
+python dns_architecture_manager.py --mode interactive  # Interactive mode
 ```
 
 ### Manual Setup
@@ -31,15 +47,47 @@ pip install -r requirements.txt
 bash generate_tsig_key.sh    # For TSIG authentication
 bash generate_certs.sh       # For DoT/DoH
 
-# 3. Start primary server
-python -m dns_server.main --port-udp 5353 --port-tcp 5354
+# 3. Start primary server (with TSIG for gateway compatibility)
+python -m dns_server.main --port-udp 5353 --port-tcp 5354 \
+  --zone dns_server/zones/primary.zone \
+  --tsig-name tsig-key-1752130646 \
+  --tsig-secret 2vgKc8+OH9UMBrRYTBYOmjffLaCFVtGQPgXjt6fw05k=
 
 # 4. Start secondary servers (in separate terminals)
-python -m dns_server.main --port-udp 7353 --port-tcp 7354 --secondary --primary-server 127.0.0.1 --primary-port 5354
-python -m dns_server.main --port-udp 8353 --port-tcp 8354 --secondary --primary-server 127.0.0.1 --primary-port 5354
+python -m dns_server.main --port-udp 7353 --port-tcp 7354 --secondary \
+  --primary-server 127.0.0.1 --primary-port 5354 \
+  --tsig-name tsig-key-1752130646 \
+  --tsig-secret 2vgKc8+OH9UMBrRYTBYOmjffLaCFVtGQPgXjt6fw05k= --primary-server 127.0.0.1 --primary-port 5354
+python -m dns_server.main --port-udp 8353 --port-tcp 8354 --secondary \
+  --primary-server 127.0.0.1 --primary-port 5354 \
+  --tsig-name tsig-key-1752130646 \
+  --tsig-secret 2vgKc8+OH9UMBrRYTBYOmjffLaCFVtGQPgXjt6fw05k=
+
+# 5. Start DNS Gateway (optional - for load balancing)
+python -m dns_server.utils.dns_gateway \
+  --listen-port 9353 \
+  --backend-servers "127.0.0.1:5353" "127.0.0.1:7353" "127.0.0.1:8353" \
+  --tsig-key-name tsig-key-1752130646 \
+  --tsig-secret 2vgKc8+OH9UMBrRYTBYOmjffLaCFVtGQPgXjt6fw05k=
 ```
 
+**Note**: If you plan to use the DNS Gateway, all backend servers must be configured with the same TSIG key to handle signed queries from the gateway.
+
 ## Server Configurations
+
+### Important: TSIG Compatibility
+
+If you're using the DNS Gateway, backend servers **must** be configured with TSIG authentication because the gateway signs all forwarded queries. Starting a server without TSIG while a TSIG-enabled gateway is running will result in "got signed message without keyring" errors.
+
+**For Gateway compatibility, always use:**
+```bash
+# Backend servers for gateway
+python -m dns_server.main \
+  --port-udp 5353 \
+  --zone dns_server/zones/primary.zone \
+  --tsig-name tsig-key-1752130646 \
+  --tsig-secret 2vgKc8+OH9UMBrRYTBYOmjffLaCFVtGQPgXjt6fw05k=
+```
 
 ### Basic DNS Server
 ```bash
@@ -136,6 +184,29 @@ python -m dns_server.main \
   --addr 0.0.0.0 \
   --port-udp 5353 \
   --port-tcp 5354
+```
+
+### DNS Gateway (Load Balancer + Proxy)
+```bash
+# Start DNS Gateway with multiple backend servers and TSIG authentication
+python -m dns_server.utils.dns_gateway \
+  --listen-address 127.0.0.1 \
+  --listen-port 9353 \
+  --backend-servers "127.0.0.1:5353" "127.0.0.1:7353" "127.0.0.1:8353" \
+  --rate-limit-threshold 100 \
+  --rate-limit-window 5 \
+  --rate-limit-ban 300 \
+  --health-check-interval 30 \
+  --tsig-key-file dns_server/keys/tsig-key-1752130646.key
+
+# Alternative: Direct TSIG configuration
+python -m dns_server.utils.dns_gateway \
+  --listen-address 127.0.0.1 \
+  --listen-port 9353 \
+  --backend-servers "127.0.0.1:5353" \
+  --tsig-key-name tsig-key-1752130646 \
+  --tsig-key-secret 2vgKc8+OH9UMBrRYTBYOmjffLaCFVtGQPgXjt6fw05k= \
+  --require-tsig  # Require TSIG from clients (optional)
 ```
 
 ## Testing Commands
@@ -266,3 +337,106 @@ dig @127.0.0.1 -p 5353 www.example.com A
 - Use ACLs to restrict zone transfers
 - TLS certificates should be from trusted CA in production
 - Store secrets in environment variables, not config files
+
+## 🏗️ Architecture Options
+
+### Option 1: Standalone DNS Server
+```
+Client → DNS Server (Primary/Secondary)
+```
+- Single DNS server handling all queries
+- Good for: Development, small deployments
+- Features: All DNS server features, no load balancing
+
+### Option 2: DNS Server + Gateway
+```
+Client → DNS Gateway → DNS Server
+```
+- Gateway acts as proxy and load balancer
+- Good for: Medium deployments, DoS protection
+- Features: Load balancing, health monitoring, enhanced rate limiting
+
+### Option 3: Multi-Server + Gateway (Enterprise)
+```
+Client → DNS Gateway → Multiple DNS Servers
+                     ├── Primary DNS Server
+                     ├── Secondary DNS Server 1  
+                     └── Secondary DNS Server 2
+```
+- Full enterprise architecture with redundancy
+- Good for: Production, high availability, high traffic
+- Features: Load balancing, automatic failover, zone synchronization
+
+## 🌐 DNS Gateway Features
+
+The DNS Gateway extends your DNS server with enterprise-grade proxy capabilities:
+
+### Load Balancing
+- **Round-robin distribution** across multiple backend DNS servers
+- **Health monitoring** with automatic failover
+- **Server pool management** (add/remove servers dynamically)
+
+### Enhanced Security
+- **TSIG Authentication** for secure communication with backend servers
+- **Rate limiting** with configurable thresholds and ban durations
+- **Access Control Lists** (ACL) integration
+- **DoS protection** with IP blocking
+
+### Monitoring & Statistics
+- **Real-time statistics** on queries, errors, and backend status
+- **Health check reporting** for all backend servers
+- **Performance metrics** and load distribution tracking
+
+### High Availability
+- **Automatic failover** when backend servers become unavailable
+- **Graceful degradation** with remaining healthy servers
+- **Backend recovery detection** and automatic re-inclusion
+
+## 🔧 Troubleshooting
+
+### Common Issues
+
+#### "got signed message without keyring" Error
+
+**Problem**: You see this error when a DNS server receives TSIG-signed queries but wasn't configured with TSIG authentication.
+
+**Symptoms**:
+```
+dns.message.UnknownTSIGKey: got signed message without keyring
+```
+
+**Cause**: The DNS Gateway sends TSIG-signed queries to backend servers, but the backend server was started without TSIG configuration.
+
+**Solution**: Always start backend servers with TSIG when using the DNS Gateway:
+```bash
+# ❌ Wrong: Server without TSIG (will fail with gateway)
+python -m dns_server.main --port-udp 5353
+
+# ✅ Correct: Server with TSIG (works with gateway) 
+python -m dns_server.main --port-udp 5353 \
+  --tsig-name tsig-key-1752130646 \
+  --tsig-secret 2vgKc8+OH9UMBrRYTBYOmjffLaCFVtGQPgXjt6fw05k=
+```
+
+#### Gateway Health Check Failures
+
+**Problem**: Gateway logs show "Backend server failed health check"
+
+**Cause**: Backend servers not configured with TSIG or using wrong TSIG key
+
+**Solution**: Ensure all backend servers use the same TSIG key as the gateway
+
+#### TSIG Verify Failure
+
+**Problem**: dig shows "Couldn't verify signature: tsig verify failure"
+
+**Cause**: Client and server have mismatched TSIG keys or the response signature is invalid
+
+**Solution**: This is usually cosmetic - the query still works, but check TSIG key consistency
+
+### Best Practices
+
+1. **Consistent TSIG Configuration**: Use the same TSIG key across all servers in your architecture
+2. **Test Without Gateway First**: Start with basic server configuration, then add gateway
+3. **Check Logs**: Always check logs for specific error messages
+4. **Use Test Scripts**: The provided test scripts handle TSIG configuration automatically
