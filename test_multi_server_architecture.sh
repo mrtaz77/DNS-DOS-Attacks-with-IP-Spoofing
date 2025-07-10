@@ -800,9 +800,10 @@ main() {
     for record in "${all_final_records[@]}"; do
         echo -e "\n${BLUE}Final verification: $record${NC}"
         
-        primary_result=$(dig @127.0.0.1 -p $PRIMARY_PORT_UDP $record A +short 2>/dev/null | head -1)
-        secondary1_result=$(dig @127.0.0.1 -p $SECONDARY1_PORT_UDP $record A +short 2>/dev/null | head -1)
-        secondary2_result=$(dig @127.0.0.1 -p $SECONDARY2_PORT_UDP $record A +short 2>/dev/null | head -1)
+        # Get all A records and sort them for proper comparison
+        primary_result=$(dig @127.0.0.1 -p $PRIMARY_PORT_UDP $record A +short 2>/dev/null | sort | tr '\n' ' ' | sed 's/ $//')
+        secondary1_result=$(dig @127.0.0.1 -p $SECONDARY1_PORT_UDP $record A +short 2>/dev/null | sort | tr '\n' ' ' | sed 's/ $//')
+        secondary2_result=$(dig @127.0.0.1 -p $SECONDARY2_PORT_UDP $record A +short 2>/dev/null | sort | tr '\n' ' ' | sed 's/ $//')
         
         echo -e "  Primary:     ${GREEN}$primary_result${NC}"
         echo -e "  Secondary1:  ${GREEN}$secondary1_result${NC}"
