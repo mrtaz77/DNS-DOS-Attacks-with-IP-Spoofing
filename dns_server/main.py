@@ -1,0 +1,77 @@
+import argparse
+import threading
+import time
+import logging
+
+from .handler import DNSHandler
+from .servers.udp_server import UDPServer
+from .servers.tcp_server import TCPServer
+from .servers.tls_server import TLSServer
+from .servers.doh_server import DoHServer
+
+
+# configure root logger
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+
+
+def main():
+    parser = argparse.ArgumentParser(description="DNS Server")
+    parser.add_argument("--zone", default="dns_server/zones/primary.zone", help="Path to zone file")
+    parser.add_argument("--keyfile", help="Private key PEM file for DNSSEC signing (optional)")
+    parser.add_argument("--tsig-name", help="TSIG key name (optional)")
+    parser.add_argument("--tsig-secret", help="TSIG base64 secret (optional)")
+    parser.add_argument("--forwarder", help="Upstream DNS forwarder IP (optional)")
+    parser.add_argument("--allow", nargs="*", default=[], help="ACL allow networks (CIDR)")
+    parser.add_argument("--deny", nargs="*", default=[], help="ACL deny networks (CIDR)")
+    parser.add_argument("--certfile", help="TLS certificate PEM for DoT/DoH (optional)")
+    parser.add_argument("--certkey", help="TLS private key PEM for DoT/DoH (optional)")
+    parser.add_argument("--addr", default="0.0.0.0", help="Bind address")
+    parser.add_argument("--port-udp", type=int, default=53, help="UDP port for DNS queries")
+    parser.add_argument("--port-tcp", type=int, default=53, help="TCP port for DNS queries")
+    parser.add_argument("--port-dot", type=int, default=853, help="Port for DNS-over-TLS (DoT)")
+    parser.add_argument("--port-doh", type=int, default=443, help="Port for DNS-over-HTTPS (DoH)")
+    args = parser.parse_args()
+
+    tsig = None
+    if args.tsig_name and args.tsig_secret:
+        tsig = {"name": args.tsig_name, "secret": args.tsig_secret}
+
+    handler = DNSHandler(
+        zone_file=args.zone,
+        key_file=args.keyfile,
+        forwarder=args.forwarder,
+        acl_rules={"allow": args.allow, "deny": args.deny},
+        tsig_key=tsig
+    )
+
+    threads = []
+    # UDP server
+    udp = UDPServer(handler, args.addr, args.port_udp)
+    threads.append(threading.Thread(target=udp.serve, daemon=True))
+
+    # TCP server
+    tcp = TCPServer(handler, args.addr, args.port_tcp)
+    threads.append(threading.Thread(target=tcp.serve, daemon=True))
+
+    # TLS (DoT) and HTTPS (DoH) servers if certs provided
+    if args.certfile and args.certkey:
+        dot = TLSServer(handler, args.addr, args.port_dot, args.certfile, args.certkey)
+        threads.append(threading.Thread(target=dot.serve, daemon=True))
+
+        doh = DoHServer(handler, args.addr, args.port_doh, args.certfile, args.certkey)
+        threads.append(threading.Thread(target=doh.serve, daemon=True))
+
+    # start all
+    for t in threads:
+        t.start()
+
+    logging.info("DNS servers running. Press Ctrl+C to stop.")
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        logging.info("Shutting down DNS servers.")
+
+
+if __name__ == "__main__":
+    main()
