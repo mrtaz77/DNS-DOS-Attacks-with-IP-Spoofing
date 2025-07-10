@@ -20,8 +20,30 @@ class TCPServer:
             self.sock.close()
 
     def _process(self, conn, addr):
-        data = conn.recv(4096)
-        resp, _ = self.handler.handle(data, addr)
-        if resp:
-            conn.sendall(resp)
-        conn.close()
+        try:
+            # Read 2-byte length prefix first
+            length_data = conn.recv(2)
+            if len(length_data) < 2:
+                return
+            
+            # Convert length from network byte order
+            length = int.from_bytes(length_data, byteorder='big')
+            
+            # Read the actual DNS message
+            data = b''
+            while len(data) < length:
+                chunk = conn.recv(length - len(data))
+                if not chunk:
+                    break
+                data += chunk
+            
+            if len(data) == length:
+                resp_wire, _ = self.handler.handle(data, addr)
+                if resp_wire:
+                    # Send response with length prefix
+                    resp_length = len(resp_wire).to_bytes(2, byteorder='big')
+                    conn.sendall(resp_length + resp_wire)
+        except Exception as e:
+            print(f"TCP processing error: {e}")
+        finally:
+            conn.close()

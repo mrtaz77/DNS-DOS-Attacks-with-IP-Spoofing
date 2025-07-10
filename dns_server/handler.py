@@ -52,10 +52,19 @@ class DNSHandler:
             logging.warning("ACL denied request from %s", client_ip)
             return None, None
         try:
-            msg = dns.message.from_wire(wire)
+            # Parse message with TSIG validation if TSIG is configured
             if self.tsig:
-                if not msg.tsig: return None, None
-                if not self.tsig.verify(msg): return None, None
+                msg = dns.message.from_wire(wire, keyring=self.tsig.keyring)
+                if not msg.tsig:
+                    logging.warning("TSIG required but not provided")
+                    return None, None
+                # TSIG validation happens automatically during from_wire parsing
+                if not msg.had_tsig:
+                    logging.warning("TSIG validation failed")
+                    return None, None
+            else:
+                msg = dns.message.from_wire(wire)
+                
             q = msg.question[0]
             qtype = dns.rdatatype.to_text(q.rdtype)
             if msg.opcode() == dns.opcode.UPDATE:
@@ -71,8 +80,12 @@ class DNSHandler:
                 logging.info("Cache hit for %s %s", q.name, qtype)
                 resp = dns.message.make_response(msg)
                 resp.answer.append(rr)
+                if self.tsig:
+                    resp.use_tsig(self.tsig.keyring, keyname=self.tsig.key_name)
                 return resp.to_wire(), None
             resp = self._do_query(msg)
+            if self.tsig and resp:
+                resp.use_tsig(self.tsig.keyring, keyname=self.tsig.key_name)
             logging.info("Answered query for %s %s", q.name, qtype)
             return resp.to_wire(), None
         except Exception:
@@ -135,7 +148,9 @@ class DNSHandler:
         for name, node in self.zone.nodes.items():
             for rdataset in node.rdatasets:
                 rr = dns.rrset.RRset(name, rdataset.rdclass, rdataset.rdtype)
-                rr.update(rdataset)
+                rr.ttl = rdataset.ttl
+                for rdata in rdataset:
+                    rr.add(rdata)
                 resp.answer.append(rr)
                 if self.private_key:
                     # generate RRSIG for each RRset
@@ -156,5 +171,6 @@ class DNSHandler:
                         origin=self.zone.origin
                     )
                     sig.add(signature)
+                    resp.answer.append(sig)
         logging.info("Completed zone transfer for zone %s", self.zone.origin)
         return resp

@@ -1,299 +1,193 @@
-# DNS-DOS-Attacks-with-IP-Spoofing
-Dos attacks against dns server using ip spoofing
+# DNS Server with Security Features
 
-## Overview
-This project implements a full-featured DNS server (UDP, TCP, DNS-over-TLS, DNS-over-HTTPS) with support for zone files, caching, ACLs, TSIG authentication, and DNSSEC signing.
+A production-ready DNS server supporting UDP/TCP/DoT/DoH protocols with TSIG authentication, ACLs, caching, DNSSEC, and dynamic updates.
 
-## Installation
-1. Clone the repo:
-   ```bash
-   git clone <repo_url>
-   cd DNS-DOS-Attacks-with-IP-Spoofing
-   ```
-2. Create a Python virtual environment and activate it:
-   ```bash
-   python3 -m venv venv
-   source venv/bin/activate
-   ```
-3. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
-4. Install BIND utilities (for TSIG key generation):
-   ```bash
-   # Debian/Ubuntu
-   sudo apt-get update && sudo apt-get install -y bind9utils
-   # CentOS/RHEL
-   sudo yum install -y bind-utils
-   ```
+## Quick Start
 
-## Generating TLS Certificates
-To enable DNS-over-TLS (DoT) and DNS-over-HTTPS (DoH), generate a self-signed certificate:
 ```bash
-bash generate_certs.sh
+# 1. Setup
+git clone <repo_url> && cd DNS-DOS-Attacks-with-IP-Spoofing
+python3 -m venv venv && source venv/bin/activate
+pip install -r requirements.txt
+
+# 2. Generate keys (optional)
+bash generate_tsig_key.sh    # For TSIG authentication
+bash generate_certs.sh       # For DoT/DoH
+
+# 3. Run basic server
+python -m dns_server.main --zone dns_server/zones/primary.zone
 ```
-The script creates:
-- `dns_server/certs/cert.pem`
-- `dns_server/certs/key.pem`
 
-## Generating a TSIG Key
-To use TSIG authentication for dynamic updates or zone transfers, generate a TSIG key:
+## Server Configurations
+
+### Basic DNS Server
 ```bash
-bash generate_tsig_key.sh
-```
-The script will output a key name and a base64 secret. Use these values with the `--tsig-name` and `--tsig-secret` options when starting the server.
-
-## Zone Files
-Edit or add zone files under `dns_server/zones/`. By default, `primary.zone` is loaded as the primary zone.
-
-## Running the DNS Server Locally
-Start all supported servers with:
-```bash
-python3 -m dns_server.main \
+python -m dns_server.main \
   --zone dns_server/zones/primary.zone \
-  --keyfile dns_server/certs/key.pem \
+  --addr 0.0.0.0 \
+  --port-udp 53 \
+  --port-tcp 53
+```
+
+### TSIG-Secured Server (All queries require authentication)
+```bash
+python -m dns_server.main \
+  --zone dns_server/zones/primary.zone \
+  --tsig-name <KEY_NAME> \
+  --tsig-secret <SECRET> \
+  --addr 127.0.0.1 \
+  --port-udp 5353
+```
+
+### ACL-Protected Server
+```bash
+python -m dns_server.main \
+  --zone dns_server/zones/primary.zone \
+  --allow 192.168.1.0/24 \
+  --deny 10.0.0.0/8 \
+  --addr 0.0.0.0
+```
+
+### Full-Featured Server (DoT + DoH + TSIG + ACL)
+```bash
+python -m dns_server.main \
+  --zone dns_server/zones/primary.zone \
   --certfile dns_server/certs/cert.pem \
   --certkey dns_server/certs/key.pem \
-  --tsig-name "<KEY_NAME>" \
-  --tsig-secret "<SECRET>" \
+  --tsig-name <KEY_NAME> \
+  --tsig-secret <SECRET> \
+  --allow 192.168.0.0/16 \
   --addr 0.0.0.0
 ```
-> Note: binding to port 53 requires root privileges. If you see `Permission denied`, either:
-> - Run the command with `sudo`, e.g.:
->   ```bash
->   sudo python3 -m dns_server.main ...
->   ```
-> - Or bind to non-privileged ports (>1024):
->   ```bash
->   python3 -m dns_server.main --port-udp 5353 --port-tcp 5353 ...
->   ```
 
-Options:
-- `--zone`: Path to zone file
-- `--keyfile`: PEM file for DNSSEC
-- `--certfile`/`--certkey`: TLS cert/key PEM for DoT/DoH
-- `--tsig-name`/`--tsig-secret`: TSIG authentication
-- `--forwarder`: Upstream DNS forwarder IP (optional)
-- `--allow`/`--deny`: ACL CIDR rules (optional)
+### Primary-Secondary Setup
 
-## Running Multiple DNS Instances
-You can run a primary (master) and one or more secondary (slave) servers to support zone transfers.
-
-### Primary Server
-In one terminal, start the primary zone (handles updates and notifies secondaries):
+**Primary (Master):**
 ```bash
-python3 -m dns_server.main \
+python -m dns_server.main \
   --zone dns_server/zones/primary.zone \
-  --keyfile dns_server/certs/key.pem \
-  --tsig-name <keyname> \
-  --tsig-secret <secret> \
-  --addr 0.0.0.0
+  --tsig-name <KEY_NAME> \
+  --tsig-secret <SECRET> \
+  --addr 0.0.0.0 \
+  --port-udp 53 \
+  --port-tcp 53
 ```
 
-### Secondary Server
-In another terminal (or on a different host), start the secondary server pointing at the primary as a forwarder for AXFR:
+**Secondary (Slave):**
 ```bash
-python3 -m dns_server.main \
+python -m dns_server.main \
   --zone dns_server/zones/secondary.zone \
   --forwarder <PRIMARY_IP> \
-  --tsig-name <keyname> \
-  --tsig-secret <secret> \
-  --addr 0.0.0.0
+  --tsig-name <KEY_NAME> \
+  --tsig-secret <SECRET> \
+  --addr 0.0.0.0 \
+  --port-udp 5353
 ```
 
-- Ensure `secondary.zone` has the same `$ORIGIN` and NS records as the primary.
-- The secondary will perform an AXFR from the primary and serve the delegated zone.
+## Testing Commands
 
-## DNS Query Testing Guide
-
-This section provides comprehensive examples for testing your DNS server with various query types and scenarios.
-
-### Basic Query Syntax
+### Basic Queries
 ```bash
-dig [@server] [-p port] [domain] [record-type] [options]
+# A record
+dig @127.0.0.1 -p 5353 www.example.com A
+
+# MX record  
+dig @127.0.0.1 -p 5353 www.example.com MX
+
+# Zone transfer (AXFR)
+dig @127.0.0.1 -p 5353 example.com AXFR +tcp
+
+# Cache test (run twice, second should be faster)
+dig @127.0.0.1 -p 5353 www.example.com A
 ```
 
-### 1. Testing A Records (IPv4 Addresses)
-
-#### Existing A Records
+### TSIG Authentication
 ```bash
-# Test www.example.com
-dig @127.0.0.1 -p15353 www.example.com A
-# Expected: 192.168.1.2
+# Without TSIG (will timeout if TSIG required)
+dig @127.0.0.1 -p 5353 example.com A
 
-# Test name server
-dig @127.0.0.1 -p15353 ns1.example.com A
-# Expected: 192.168.1.1
+# With TSIG (using dig)
+dig @127.0.0.1 -p 5353 example.com A -y <KEY_NAME>:<SECRET>
 
-# Short output format
-dig @127.0.0.1 -p15353 www.example.com A +short
-# Expected: 192.168.1.2
+# Python TSIG test
+python test_tsig_authenticated.py
 ```
 
-#### Nonexistent A Records
+### DNS Updates
 ```bash
-dig @127.0.0.1 -p15353 nonexistent.example.com A
-# Expected: status: NXDOMAIN, no ANSWER section
+# Using nsupdate with TSIG
+nsupdate << EOF
+server 127.0.0.1 5353
+key hmac-sha256:<KEY_NAME> <SECRET>
+zone example.com
+update add testx.example.com 300 A 1.2.3.4
+send
+quit
+EOF
+
+# Using Python script
+python test_update.py
 ```
 
-### 2. Testing SOA Records (Start of Authority)
+### ACL Testing
 ```bash
-dig @127.0.0.1 -p15353 example.com SOA
-# Expected: ns1.example.com. admin.example.com. 2021120901 3600 1800 604800 3600
+# Start server with ACL denying your IP
+python -m dns_server.main --zone dns_server/zones/primary.zone --deny 127.0.0.0/24
+
+# Test (should timeout)
+dig @127.0.0.1 -p 5353 www.example.com A
 ```
 
-### 3. Testing NS Records (Name Server)
-```bash
-dig @127.0.0.1 -p15353 example.com NS
-# Expected: ns1.example.com.
-```
+## Command Line Options
 
-### 4. Testing MX Records (Mail Exchange)
-```bash
-dig @127.0.0.1 -p15353 www.example.com MX
-# Expected: 10 mail.example.com.
-```
+| Option | Description | Example |
+|--------|-------------|---------|
+| `--zone` | Zone file path | `dns_server/zones/primary.zone` |
+| `--addr` | Bind address | `0.0.0.0` or `127.0.0.1` |
+| `--port-udp` | UDP port | `53` or `5353` |
+| `--port-tcp` | TCP port | `53` or `5353` |
+| `--port-tls` | DoT port | `853` |
+| `--port-https` | DoH port | `443` |
+| `--certfile` | TLS certificate | `dns_server/certs/cert.pem` |
+| `--certkey` | TLS private key | `dns_server/certs/key.pem` |
+| `--tsig-name` | TSIG key name | `tsig-key-123456` |
+| `--tsig-secret` | TSIG secret | `base64-encoded-secret` |
+| `--allow` | Allow networks | `192.168.1.0/24` |
+| `--deny` | Deny networks | `10.0.0.0/8` |
+| `--forwarder` | Upstream DNS | `8.8.8.8` |
 
-### 5. Testing Nonexistent Record Types
+## Features Status
 
-#### AAAA Records (IPv6 - not defined in zone)
-```bash
-dig @127.0.0.1 -p15353 www.example.com AAAA
-# Expected: status: NXDOMAIN
-```
+| Feature | Status | Notes |
+|---------|--------|-------|
+| A/MX/SOA/NS Records | ✅ | Full support |
+| AXFR/IXFR | ✅ | Zone transfers |
+| DNS UPDATE | ✅ | Dynamic updates |
+| Caching | ✅ | TTL-based |
+| ACLs | ✅ | IP-based rules |
+| TSIG | ✅ | HMAC-SHA256 |
+| DNSSEC | ⚠️ | Basic signing |
+| DoT/DoH | ⚠️ | TLS support |
 
-#### CNAME Records (not defined in zone)
-```bash
-dig @127.0.0.1 -p15353 www.example.com CNAME
-# Expected: status: NXDOMAIN
-```
+✅ = Production ready  
+⚠️ = Functional, needs testing
 
-#### TXT Records (not defined in zone)
-```bash
-dig @127.0.0.1 -p15353 example.com TXT
-# Expected: status: NXDOMAIN
-```
+## Development
 
-### 6. Advanced Query Options
+### Key Files
+- `dns_server/main.py` - Server entry point
+- `dns_server/handler.py` - DNS query handler  
+- `dns_server/utils/tsig.py` - TSIG authentication
+- `dns_server/utils/acl.py` - Access control
+- `dns_server/zones/primary.zone` - Zone data
 
-#### Query All Available Records
-```bash
-dig @127.0.0.1 -p15353 www.example.com ANY
-# Returns all record types for the domain
-```
+### Test Scripts
+- `test_tsig_authenticated.py` - TSIG validation tests
+- `test_update.py` - DNS UPDATE tests  
+- `test_axfr.py` - Zone transfer tests
 
-#### Force TCP Query
-```bash
-dig @127.0.0.1 -p15353 www.example.com A +tcp
-# Uses TCP instead of UDP
-```
-
-#### No Recursion
-```bash
-dig @127.0.0.1 -p15353 www.example.com A +norecurse
-# Disables recursive queries
-```
-
-#### Show Query Statistics
-```bash
-dig @127.0.0.1 -p15353 www.example.com A +stats
-# Shows query time and other statistics
-```
-
-### 7. Testing Cache Functionality
-```bash
-# First query (will be cached)
-dig @127.0.0.1 -p15353 www.example.com MX
-
-# Second query (should hit cache)
-dig @127.0.0.1 -p15353 www.example.com MX
-```
-Check server logs to see "Cache hit" messages for the second query.
-
-### 8. Alternative DNS Query Tools
-
-#### Using nslookup
-```bash
-# Basic lookup
-nslookup www.example.com 127.0.0.1
-
-# Specific record type
-nslookup -type=MX www.example.com 127.0.0.1
-nslookup -type=SOA example.com 127.0.0.1
-```
-
-#### Using host command
-```bash
-# Basic lookup
-host www.example.com 127.0.0.1
-
-# Specific record type
-host -t MX www.example.com 127.0.0.1
-host -t SOA example.com 127.0.0.1
-```
-
-### 9. Understanding DNS Response Codes
-
-#### NOERROR (Success)
-- **Status**: `status: NOERROR`
-- **When**: Record exists and is returned successfully
-- **Example**: `dig @127.0.0.1 -p15353 www.example.com A`
-
-#### NXDOMAIN (Domain doesn't exist)
-- **Status**: `status: NXDOMAIN`
-- **When**: Queried domain/record doesn't exist in the zone
-- **Example**: `dig @127.0.0.1 -p15353 nonexistent.example.com A`
-
-#### SERVFAIL (Server failure)
-- **Status**: `status: SERVFAIL`
-- **When**: DNS server encounters an internal error
-- **Troubleshooting**: Check server logs for error messages
-
-#### REFUSED (Query refused)
-- **Status**: `status: REFUSED`
-- **When**: Server refuses to answer (often due to ACL restrictions)
-- **Troubleshooting**: Check ACL configuration
-
-### 10. Zone Content Summary
-
-Your DNS server hosts the following records in the `example.com` zone:
-
-| Record Type | Name | Value |
-|-------------|------|-------|
-| SOA | example.com | ns1.example.com. admin.example.com. |
-| NS | example.com | ns1.example.com. |
-| A | www.example.com | 192.168.1.2 |
-| A | ns1.example.com | 192.168.1.1 |
-| A | ns3.example.com | 192.168.1.9 |
-| A | ns4.example.com | 192.168.1.9 |
-| A | ns5.example.com | 192.168.1.4 |
-| A | ns7.example.com | 192.168.1.8 |
-| A | ns8.example.com | 192.168.2.1 |
-| MX | www.example.com | 10 mail.example.com. |
-
-### 11. Troubleshooting Common Issues
-
-#### Timeout Errors
-```bash
-# If you see: "communications error to 127.0.0.1#15353: timed out"
-# Check if server is running:
-ps aux | grep dns_server
-
-# Check if port is listening:
-ss -tulnp | grep :15353
-```
-
-#### NXDOMAIN for Existing Records
-- Verify zone file format (should have `$TTL` directive)
-- Check server logs for zone loading errors
-- Ensure record names match exactly (including trailing dots)
-
-#### Server Won't Start
-- Install required Python packages: `pip install -r requirements.txt`
-- Check for syntax errors in zone files
-- Ensure proper permissions on certificate files
-
-## Next Steps
-- Deploy on Azure VM for testing DoS attacks with IP spoofing
-- Extend zones, add secondary/slave zones
-- Integrate metrics collection or monitoring dashboards
+### Security Notes
+- TSIG keys should be generated per deployment
+- Use ACLs to restrict zone transfers
+- TLS certificates should be from trusted CA in production
+- Store secrets in environment variables, not config files
