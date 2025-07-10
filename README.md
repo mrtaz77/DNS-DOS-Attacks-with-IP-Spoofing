@@ -440,3 +440,143 @@ python -m dns_server.main --port-udp 5353 \
 2. **Test Without Gateway First**: Start with basic server configuration, then add gateway
 3. **Check Logs**: Always check logs for specific error messages
 4. **Use Test Scripts**: The provided test scripts handle TSIG configuration automatically
+
+## 🛡️ DNS Gatekeeping and Security Features
+
+Your DNS server includes comprehensive gatekeeping functionality to control and secure DNS access:
+
+### Access Control Gatekeeping
+
+#### 1. Network-Based Access Control (ACL)
+```bash
+# Allow only trusted networks
+python -m dns_server.main \
+  --zone dns_server/zones/primary.zone \
+  --allow 192.168.1.0/24 10.0.0.0/8 \
+  --deny 172.16.0.0/12 \
+  --port-udp 5353
+
+# Test ACL blocking
+dig @127.0.0.1 -p 5353 www.example.com A  # Will timeout if your IP is blocked
+```
+
+#### 2. Query-Based Gatekeeping
+```bash
+# Rate limiting to prevent DoS attacks
+python -m dns_server.main \
+  --rate-limit-threshold 50 \
+  --rate-limit-window 10 \
+  --rate-limit-ban-duration 600 \
+  --port-udp 5353
+
+# Test rate limiting
+python test_rate_limiting.py --test burst  # Triggers protective blocking
+```
+
+#### 3. Authentication-Based Gatekeeping
+```bash
+# TSIG-only server (requires authentication for all queries)
+python -m dns_server.main \
+  --zone dns_server/zones/primary.zone \
+  --tsig-name tsig-key-1752130646 \
+  --tsig-secret 2vgKc8+OH9UMBrRYTBYOmjffLaCFVtGQPgXjt6fw05k= \
+  --port-udp 5353
+
+# Only authenticated queries work
+dig @127.0.0.1 -p 5353 www.example.com A \
+  -y tsig-key-1752130646:2vgKc8+OH9UMBrRYTBYOmjffLaCFVtGQPgXjt6fw05k=
+```
+
+### Gateway-Level Gatekeeping
+
+#### DNS Gateway as Security Gateway
+The DNS Gateway acts as a comprehensive security gateway with multiple protection layers:
+
+```bash
+# Start security-focused gateway
+python -m dns_server.utils.dns_gateway \
+  --listen-port 9353 \
+  --backend-servers "127.0.0.1:5353" "127.0.0.1:7353" \
+  --rate-limit-threshold 30 \
+  --rate-limit-window 5 \
+  --rate-limit-ban 900 \
+  --tsig-key-file dns_server/keys/tsig-key-1752130646.key \
+  --require-tsig  # Optional: Require client TSIG authentication
+```
+
+#### Multi-Layer Protection
+1. **Client Filtering**: ACL and rate limiting at gateway level
+2. **Query Signing**: Automatic TSIG signing of backend queries
+3. **Health Monitoring**: Only route to healthy, secure backends
+4. **Load Distribution**: Prevent overload on individual servers
+
+### Gatekeeping Test Commands
+
+#### Test Access Control
+```bash
+# Test network blocking
+python -m dns_server.main --deny 127.0.0.0/24 --port-udp 5353 &
+dig @127.0.0.1 -p 5353 www.example.com A  # Should timeout (blocked)
+```
+
+#### Test Rate Limiting
+```bash
+# Start rate-limited server
+python -m dns_server.main --rate-limit-threshold 5 --rate-limit-window 10 --port-udp 5353 &
+
+# Trigger rate limiting
+for i in {1..10}; do 
+  dig @127.0.0.1 -p 5353 test$i.example.com A +short; 
+done
+# Later queries should be blocked
+```
+
+#### Test Authentication Gatekeeping
+```bash
+# TSIG-required server
+python -m dns_server.main --tsig-name test-key --tsig-secret dGVzdA== --port-udp 5353 &
+
+# Unauthenticated query (will timeout)
+dig @127.0.0.1 -p 5353 www.example.com A
+
+# Authenticated query (will work)
+dig @127.0.0.1 -p 5353 www.example.com A -y test-key:dGVzdA==
+```
+
+### Gatekeeping Statistics and Monitoring
+
+#### View Protection Statistics
+```bash
+# Gateway statistics include gatekeeping metrics
+curl http://localhost:8080/stats  # If monitoring enabled
+
+# Log analysis for security events
+grep "blocked\|denied\|rate limit" logs/*.log
+```
+
+#### Security Event Types
+- **ACL Violations**: Blocked IP addresses
+- **Rate Limit Triggers**: DoS attack mitigation
+- **Authentication Failures**: Invalid TSIG signatures
+- **Health Check Failures**: Backend server problems
+
+### Integration with External Security Tools
+
+#### Fail2Ban Integration
+```bash
+# Monitor DNS logs for attacks
+# Add to /etc/fail2ban/jail.local:
+[dns-dos]
+enabled = true
+port = 53
+protocol = udp
+filter = dns-dos
+logpath = /path/to/dns/logs/*.log
+maxretry = 10
+bantime = 3600
+```
+
+#### SIEM Integration
+- Export security logs in structured format
+- Real-time alerting on security events
+- Integration with security orchestration platforms
