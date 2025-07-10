@@ -30,6 +30,10 @@ def main():
     parser.add_argument("--port-tcp", type=int, default=53, help="TCP port for DNS queries")
     parser.add_argument("--port-dot", type=int, default=853, help="Port for DNS-over-TLS (DoT)")
     parser.add_argument("--port-doh", type=int, default=443, help="Port for DNS-over-HTTPS (DoH)")
+    parser.add_argument("--secondary", action="store_true", help="Run as secondary server (read-only, no updates)")
+    parser.add_argument("--primary-server", help="Primary server IP for zone transfers (required for secondary)")
+    parser.add_argument("--primary-port", type=int, default=53, help="Primary server TCP port for zone transfers")
+    parser.add_argument("--refresh-interval", type=int, default=3600, help="Zone refresh interval in seconds (for secondary)")
     args = parser.parse_args()
 
     tsig = None
@@ -41,7 +45,11 @@ def main():
         key_file=args.keyfile,
         forwarder=args.forwarder,
         acl_rules={"allow": args.allow, "deny": args.deny},
-        tsig_key=tsig
+        tsig_key=tsig,
+        is_secondary=args.secondary,
+        primary_server=args.primary_server if args.secondary else None,
+        primary_port=args.primary_port if args.secondary else None,
+        refresh_interval=args.refresh_interval if args.secondary else None
     )
 
     threads = []

@@ -1,0 +1,13 @@
+$ORIGIN example.com.
+$TTL 3600
+example.com. 3600 IN SOA ns1.example.com. admin.example.com. 2024071017 3600 1800 604800 3600
+example.com. 3600 IN NS ns1.example.com.
+ns1.example.com. 3600 IN A 192.168.1.1
+www.example.com. 3600 IN A 192.168.1.10
+mail.example.com. 3600 IN A 192.168.1.20
+test.example.com. 3600 IN A 192.168.1.30
+update1.example.com. 0 IN A 192.168.1.100
+forwarded1.example.com. 0 IN A 192.168.1.101
+rapid1.example.com. 0 IN A 192.168.1.111
+rapid2.example.com. 0 IN A 192.168.1.122
+rapid3.example.com. 0 IN A 192.168.1.133
