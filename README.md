@@ -1,21 +1,41 @@
-# DNS Server with Security Features
+# DNS Server with Multi-Architecture Support
 
-A production-ready DNS server supporting UDP/TCP/DoT/DoH protocols with TSIG authentication, ACLs, caching, DNSSEC, and dynamic updates.
+A comprehensive DNS server implementation supporting primary/secondary architecture, zone transfers (AXFR/IXFR), DNS updates, TSIG authentication, and multiple protocols (UDP/TCP/DoT/DoH).
 
-## Quick Start
+## ✅ Features Implemented
 
+- **Multi-Server Architecture**: Primary/Secondary with automatic synchronization
+- **Zone Transfers**: AXFR (full) and IXFR (incremental) zone transfers
+- **DNS Updates**: Dynamic updates with TSIG authentication and forwarding
+- **Multiple Protocols**: UDP, TCP, DNS-over-TLS (DoT), DNS-over-HTTPS (DoH)
+- **Security**: TSIG authentication, ACLs, secure zone transfers
+- **Record Types**: A, MX, SOA, NS, CNAME, TXT records
+- **Caching**: DNS response caching with TTL management
+
+## 🚀 Quick Start
+
+### Complete Architecture Test
 ```bash
-# 1. Setup
-git clone <repo_url> && cd DNS-DOS-Attacks-with-IP-Spoofing
+# Run comprehensive test demonstrating full architecture
+./test_multi_server_architecture.sh
+```
+
+### Manual Setup
+```bash
+# 1. Setup environment
 python3 -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
 
-# 2. Generate keys (optional)
+# 2. Generate keys and certificates
 bash generate_tsig_key.sh    # For TSIG authentication
 bash generate_certs.sh       # For DoT/DoH
 
-# 3. Run basic server
-python -m dns_server.main --zone dns_server/zones/primary.zone
+# 3. Start primary server
+python -m dns_server.main --port 5353 --tcp-port 5354
+
+# 4. Start secondary servers (in separate terminals)
+python -m dns_server.main --port 7353 --tcp-port 7354 --secondary --primary-host 127.0.0.1 --primary-port 5354
+python -m dns_server.main --port 8353 --tcp-port 8354 --secondary --primary-host 127.0.0.1 --primary-port 5354
 ```
 
 ## Server Configurations

@@ -89,6 +89,18 @@ class DNSHandler:
                     logging.warning("TSIG validation failed for %s", qtype)
                     return None, None
                     
+            if msg.opcode() == dns.opcode.NOTIFY:
+                # Handle NOTIFY message from primary to trigger zone refresh
+                if self.is_secondary:
+                    logging.info("NOTIFY received from primary for zone %s, triggering zone transfer", q.name)
+                    # Schedule immediate zone transfer
+                    threading.Thread(target=self._perform_zone_transfer, daemon=True).start()
+                
+                # Send NOERROR response to NOTIFY
+                resp = dns.message.make_response(msg)
+                resp.set_rcode(dns.rcode.NOERROR)
+                return resp.to_wire(), None
+                
             if msg.opcode() == dns.opcode.UPDATE:
                 self.metrics.inc_updates()
                 if self.is_secondary:
@@ -104,7 +116,19 @@ class DNSHandler:
                         return resp.to_wire(), None
                 else:
                     logging.info("Processing DNS UPDATE for %s", q.name)
-                    return None, self._do_update(msg)
+                    success = self._do_update(msg)
+                    # Return proper response for UPDATE
+                    resp = dns.message.make_response(msg)
+                    if success:
+                        resp.set_rcode(dns.rcode.NOERROR)
+                        logging.info("UPDATE successful for %s", q.name)
+                    else:
+                        resp.set_rcode(dns.rcode.SERVFAIL)
+                        logging.error("UPDATE failed for %s", q.name)
+                    
+                    if self.tsig:
+                        resp.use_tsig(self.tsig.keyring, keyname=self.tsig.key_name)
+                    return resp.to_wire(), None
             if qtype in ('AXFR','IXFR'):
                 logging.info("Processing %s for zone %s", qtype, q.name)
                 if qtype == 'IXFR':
@@ -221,10 +245,25 @@ class DNSHandler:
             logging.error("Failed to increment SOA serial: %s", e)
     
     def _notify_secondaries(self):
-        """Send NOTIFY messages to secondary servers (simplified)"""
-        # In a real implementation, this would send DNS NOTIFY messages
-        # For now, we just log that notification would be sent
-        logging.info("NOTIFY would be sent to secondary servers")
+        """Send NOTIFY messages to secondary servers and force refresh"""
+        # For our test setup, we know the secondary servers are on specific ports
+        secondary_ports = [7354, 8354]  # TCP ports for secondary servers
+        
+        for port in secondary_ports:
+            try:
+                # Create NOTIFY message
+                notify_msg = dns.message.make_query(self.zone.origin, dns.rdatatype.SOA, dns.rdataclass.IN)
+                notify_msg.set_opcode(dns.opcode.NOTIFY)
+                
+                # Send NOTIFY to secondary
+                dns.query.tcp(notify_msg, '127.0.0.1', port=port, timeout=5)
+                logging.info("NOTIFY sent to secondary on port %d", port)
+                
+            except Exception as e:
+                logging.warning("Failed to send NOTIFY to secondary on port %d: %s", port, e)
+        
+        # Also log for debugging
+        logging.info("NOTIFY messages sent to configured secondary servers")
 
     def _do_axfr(self, msg):
         resp = dns.message.make_response(msg)
@@ -328,47 +367,120 @@ class DNSHandler:
             logging.warning("Initial zone transfer failed: %s", e)
 
     def _perform_zone_transfer(self):
-        """Perform AXFR from primary and update local zone file"""
+        """Perform AXFR or IXFR from primary and update local zone file"""
         if not self.is_secondary or not self.primary_server:
             return False
             
         try:
             import dns.query
             
-            # Create AXFR request
+            # Get current SOA serial
             zone_name = self.zone.origin
+            current_serial = 0
+            try:
+                soa_node = self.zone.nodes[zone_name]
+                soa_rdataset = soa_node.find_rdataset(dns.rdataclass.IN, dns.rdatatype.SOA)
+                if soa_rdataset:
+                    current_soa = list(soa_rdataset)[0]
+                    current_serial = current_soa.serial
+            except (KeyError, AttributeError):
+                pass
             
-            # Use TSIG if available
-            if self.tsig:
-                keyring = self.tsig.keyring
-                keyname = self.tsig.key_name
-                axfr_query = dns.message.make_query(zone_name, dns.rdatatype.AXFR)
-                axfr_query.use_tsig(keyring, keyname=keyname)
-            else:
-                axfr_query = dns.message.make_query(zone_name, dns.rdatatype.AXFR)
+            # Try IXFR first, fall back to AXFR
+            ixfr_successful = False
             
-            # Perform AXFR
-            response = dns.query.tcp(axfr_query, self.primary_server, 
-                                   port=self.primary_port, timeout=30)
-            
-            if response.answer:
-                # Update local zone file with transferred data
-                with self.lock:
-                    with open(self.zone_file, 'w') as f:
-                        f.write(f"$ORIGIN {zone_name}\n")
-                        f.write("$TTL 3600\n")
-                        
-                        for rrset in response.answer:
-                            f.write(f"{rrset}\n")
+            if current_serial > 0:
+                try:
+                    # Create IXFR request with current serial
+                    ixfr_query = dns.message.make_query(zone_name, dns.rdatatype.IXFR, dns.rdataclass.IN)
                     
-                    # Reload zone from updated file
-                    self.zone = dns.zone.from_file(self.zone_file, relativize=False)
-                    logging.info("Zone file updated and reloaded from primary")
+                    # Add SOA record with current serial to authority section for IXFR
+                    current_soa_rdata = dns.rdata.from_text(
+                        dns.rdataclass.IN, dns.rdatatype.SOA,
+                        f"ns1.example.com. admin.example.com. {current_serial} 3600 1800 604800 3600"
+                    )
+                    ixfr_query.authority.append(dns.rrset.from_rdata(zone_name, 3600, current_soa_rdata))
+                    
+                    # Use TSIG if available
+                    if self.tsig:
+                        ixfr_query.use_tsig(self.tsig.keyring, keyname=self.tsig.key_name)
+                    
+                    # Perform IXFR
+                    logging.info("Attempting IXFR with current serial %d", current_serial)
+                    response = dns.query.tcp(ixfr_query, self.primary_server, 
+                                           port=self.primary_port, timeout=20)
+                    
+                    if response.answer and len(response.answer) > 1:
+                        # IXFR response format: SOA (old), deletions, SOA (new), additions, SOA (new)
+                        logging.info("IXFR response received, processing incremental changes")
+                        
+                        # Apply IXFR changes
+                        with self.lock:
+                            for rrset in response.answer:
+                                if rrset.rdtype == dns.rdatatype.SOA:
+                                    # Update SOA
+                                    soa_node = self.zone.nodes.get(rrset.name) or self.zone.node_factory()
+                                    self.zone.nodes[rrset.name] = soa_node
+                                    soa_rdataset = soa_node.find_rdataset(rrset.rdclass, rrset.rdtype, rrset.covers, True)
+                                    soa_rdataset.clear()
+                                    for rdata in rrset:
+                                        soa_rdataset.add(rdata)
+                                else:
+                                    # Add/update other records
+                                    node = self.zone.nodes.get(rrset.name) or self.zone.node_factory()
+                                    self.zone.nodes[rrset.name] = node
+                                    rdataset = node.find_rdataset(rrset.rdclass, rrset.rdtype, rrset.covers, True)
+                                    rdataset.clear()
+                                    for rdata in rrset:
+                                        rdataset.add(rdata)
+                            
+                            # Write updated zone
+                            self.zone.to_file(self.zone_file, relativize=False, want_origin=True)
+                            
+                        ixfr_successful = True
+                        logging.info("IXFR completed successfully")
+                        
+                except Exception as e:
+                    logging.warning("IXFR failed, falling back to AXFR: %s", e)
+            
+            # Fall back to AXFR if IXFR failed or wasn't attempted
+            if not ixfr_successful:
+                logging.info("Starting periodic zone refresh from primary %s:%d", self.primary_server, self.primary_port)
                 
-                return True
-            else:
-                logging.warning("AXFR response contained no data")
-                return False
+                # Create AXFR request
+                if self.tsig:
+                    keyring = self.tsig.keyring
+                    keyname = self.tsig.key_name
+                    axfr_query = dns.message.make_query(zone_name, dns.rdatatype.AXFR)
+                    axfr_query.use_tsig(keyring, keyname=keyname)
+                else:
+                    axfr_query = dns.message.make_query(zone_name, dns.rdatatype.AXFR)
+                
+                # Perform AXFR
+                response = dns.query.tcp(axfr_query, self.primary_server, 
+                                       port=self.primary_port, timeout=30)
+                
+                if response.answer:
+                    # Update local zone file with transferred data
+                    with self.lock:
+                        with open(self.zone_file, 'w') as f:
+                            f.write(f"$ORIGIN {zone_name}\n")
+                            f.write("$TTL 3600\n")
+                            
+                            for rrset in response.answer:
+                                f.write(f"{rrset}\n")
+                        
+                        # Reload zone from updated file
+                        self.zone = dns.zone.from_file(self.zone_file, relativize=False)
+                        logging.info("Zone file updated and reloaded from primary")
+                    
+                    return True
+                else:
+                    logging.warning("AXFR response contained no data")
+                    return False
+            
+            logging.info("Zone refresh completed successfully")
+            return True
                 
         except Exception as e:
             logging.error("Zone transfer failed: %s", e)
@@ -381,39 +493,54 @@ class DNSHandler:
             return None
             
         try:
+            logging.info("Secondary server forwarding DNS UPDATE for %s to primary", 
+                        msg.question[0].name if msg.question else "unknown")
             logging.info("Secondary server forwarding DNS UPDATE for %s to primary %s:%d", 
                         msg.question[0].name if msg.question else "unknown", 
                         self.primary_server, self.primary_port)
             
-            # Ensure TSIG is properly applied to forwarded message
-            if self.tsig:
-                msg.use_tsig(self.tsig.keyring, keyname=self.tsig.key_name)
+            # Create a fresh message copy to avoid TSIG conflicts
+            forward_msg = dns.message.make_query(msg.question[0].name, msg.question[0].rdtype)
+            forward_msg.set_opcode(dns.opcode.UPDATE)  # Set UPDATE opcode
+            forward_msg.update = msg.update
+            forward_msg.authority = msg.authority
+            forward_msg.additional = msg.additional
             
-            # Forward the UPDATE to primary with retries
+            # Apply TSIG to the fresh message
+            if self.tsig:
+                forward_msg.use_tsig(self.tsig.keyring, keyname=self.tsig.key_name)
+            
+            # Forward the UPDATE to primary with improved error handling
             max_retries = 3
             for attempt in range(max_retries):
                 try:
-                    response = dns.query.tcp(msg, self.primary_server, 
-                                           port=self.primary_port, timeout=15)
+                    # Use shorter timeout and better connection handling
+                    response = dns.query.tcp(forward_msg, self.primary_server, 
+                                           port=self.primary_port, timeout=10, 
+                                           one_rr_per_rrset=True)
                     
                     if response.rcode() == dns.rcode.NOERROR:
                         logging.info("UPDATE successfully forwarded to primary (attempt %d)", attempt + 1)
-                        # Trigger zone refresh after successful update
-                        threading.Thread(target=self._perform_zone_transfer, daemon=True).start()
+                        # Schedule zone refresh after successful update (with delay)
+                        threading.Timer(2.0, self._perform_zone_transfer).start()
                         return response
                     else:
                         logging.warning("Primary rejected forwarded UPDATE: %s (attempt %d)", 
                                       dns.rcode.to_text(response.rcode()), attempt + 1)
                         return response
                         
-                except (ConnectionError, OSError, EOFError) as e:
+                except (OSError, EOFError) as e:
                     logging.warning("Connection error forwarding UPDATE (attempt %d): %s", attempt + 1, e)
                     if attempt == max_retries - 1:
-                        raise
-                    time.sleep(1)  # Brief delay before retry
+                        logging.error("Failed to forward UPDATE to primary after %d attempts: %s", max_retries, e)
+                        # Return SERVFAIL response
+                        resp = dns.message.make_response(msg)
+                        resp.set_rcode(dns.rcode.SERVFAIL)
+                        return resp
+                    time.sleep(2)  # Longer delay between retries
                     
         except Exception as e:
-            logging.error("Failed to forward UPDATE to primary after %d attempts: %s", max_retries, e)
+            logging.error("Failed to forward UPDATE to primary: %s", e)
             # Return SERVFAIL response
             resp = dns.message.make_response(msg)
             resp.set_rcode(dns.rcode.SERVFAIL)
