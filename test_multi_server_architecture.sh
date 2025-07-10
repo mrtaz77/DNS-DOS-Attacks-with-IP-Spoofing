@@ -26,8 +26,8 @@ SECONDARY1_PORT_UDP=7353
 SECONDARY1_PORT_TCP=7354
 SECONDARY2_PORT_UDP=8353
 SECONDARY2_PORT_TCP=8354
-TSIG_KEY="test-key"
-TSIG_SECRET="dGVzdGtleXNlY3JldDEyMzQ1Njc4OTBhYmNkZWZnaGlqaw=="
+TSIG_KEY="tsig-key-1752130646"
+TSIG_SECRET="2vgKc8+OH9UMBrRYTBYOmjffLaCFVtGQPgXjt6fw05k="
 
 # Cleanup function
 cleanup() {
@@ -311,8 +311,8 @@ import dns.tsigkeyring
 import sys
 
 try:
-    keyring = dns.tsigkeyring.from_text({'test-key': 'dGVzdGtleXNlY3JldDEyMzQ1Njc4OTBhYmNkZWZnaGlqaw=='})
-    keyname = dns.name.from_text('test-key')
+    keyring = dns.tsigkeyring.from_text({'tsig-key-1752130646': '2vgKc8+OH9UMBrRYTBYOmjffLaCFVtGQPgXjt6fw05k='})
+    keyname = dns.name.from_text('tsig-key-1752130646')
     
     update = dns.update.Update('example.com', keyring=keyring, keyname=keyname)
     update.add('update1.example.com.', 300, 'A', '192.168.1.100')
@@ -381,8 +381,8 @@ import dns.tsigkeyring
 import sys
 
 try:
-    keyring = dns.tsigkeyring.from_text({'test-key': 'dGVzdGtleXNlY3JldDEyMzQ1Njc4OTBhYmNkZWZnaGlqaw=='})
-    keyname = dns.name.from_text('test-key')
+    keyring = dns.tsigkeyring.from_text({'tsig-key-1752130646': '2vgKc8+OH9UMBrRYTBYOmjffLaCFVtGQPgXjt6fw05k='})
+    keyname = dns.name.from_text('tsig-key-1752130646')
     
     update = dns.update.Update('example.com', keyring=keyring, keyname=keyname)
     update.add('forwarded1.example.com.', 300, 'A', '192.168.1.101')
@@ -426,8 +426,8 @@ import dns.tsigkeyring
 import sys
 
 try:
-    keyring = dns.tsigkeyring.from_text({'test-key': 'dGVzdGtleXNlY3JldDEyMzQ1Njc4OTBhYmNkZWZnaGlqaw=='})
-    keyname = dns.name.from_text('test-key')
+    keyring = dns.tsigkeyring.from_text({'tsig-key-1752130646': '2vgKc8+OH9UMBrRYTBYOmjffLaCFVtGQPgXjt6fw05k='})
+    keyname = dns.name.from_text('tsig-key-1752130646')
     
     update = dns.update.Update('example.com', keyring=keyring, keyname=keyname)
     update.add('rapid$i.example.com.', 300, 'A', '192.168.1.1$i$i')
@@ -623,8 +623,8 @@ import dns.tsigkeyring
 import sys
 
 try:
-    keyring = dns.tsigkeyring.from_text({'test-key': 'dGVzdGtleXNlY3JldDEyMzQ1Njc4OTBhYmNkZWZnaGlqaw=='})
-    keyname = dns.name.from_text('test-key')
+    keyring = dns.tsigkeyring.from_text({'tsig-key-1752130646': '2vgKc8+OH9UMBrRYTBYOmjffLaCFVtGQPgXjt6fw05k='})
+    keyname = dns.name.from_text('tsig-key-1752130646')
     
     # Add multiple records in one update
     update = dns.update.Update('example.com', keyring=keyring, keyname=keyname)
@@ -658,8 +658,8 @@ import dns.tsigkeyring
 import sys
 
 try:
-    keyring = dns.tsigkeyring.from_text({'test-key': 'dGVzdGtleXNlY3JldDEyMzQ1Njc4OTBhYmNkZWZnaGlqaw=='})
-    keyname = dns.name.from_text('test-key')
+    keyring = dns.tsigkeyring.from_text({'tsig-key-1752130646': '2vgKc8+OH9UMBrRYTBYOmjffLaCFVtGQPgXjt6fw05k='})
+    keyname = dns.name.from_text('tsig-key-1752130646')
     
     # Delete old record and add new value
     update = dns.update.Update('example.com', keyring=keyring, keyname=keyname)
@@ -692,8 +692,8 @@ import dns.tsigkeyring
 import sys
 
 try:
-    keyring = dns.tsigkeyring.from_text({'test-key': 'dGVzdGtleXNlY3JldDEyMzQ1Njc4OTBhYmNkZWZnaGlqaw=='})
-    keyname = dns.name.from_text('test-key')
+    keyring = dns.tsigkeyring.from_text({'tsig-key-1752130646': '2vgKc8+OH9UMBrRYTBYOmjffLaCFVtGQPgXjt6fw05k='})
+    keyname = dns.name.from_text('tsig-key-1752130646')
     
     # Add different types of records
     update = dns.update.Update('example.com', keyring=keyring, keyname=keyname)

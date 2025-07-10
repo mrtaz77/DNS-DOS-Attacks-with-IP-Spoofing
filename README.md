@@ -161,7 +161,7 @@ dig @127.0.0.1 -p 5353 www.example.com A
 dig @127.0.0.1 -p 5353 example.com A
 
 # With TSIG (using dig)
-dig @127.0.0.1 -p 5353 example.com A -y tsig-key-1752130646:dGVzdGtleXNlY3JldDEyMzQ1Njc4OTBhYmNkZWZnaGlqaw==
+dig @127.0.0.1 -p 5353 example.com A -y tsig-key-1752130646:2vgKc8+OH9UMBrRYTBYOmjffLaCFVtGQPgXjt6fw05k=
 
 # Python TSIG test
 python test_tsig_authenticated.py
@@ -172,7 +172,7 @@ python test_tsig_authenticated.py
 # Using nsupdate with TSIG
 nsupdate << EOF
 server 127.0.0.1 5353
-key hmac-sha256:tsig-key-1752130646 dGVzdGtleXNlY3JldDEyMzQ1Njc4OTBhYmNkZWZnaGlqaw==
+key hmac-sha256:tsig-key-1752130646 2vgKc8+OH9UMBrRYTBYOmjffLaCFVtGQPgXjt6fw05k=
 zone example.com
 update add newtest.example.com 300 A 1.2.3.4
 send

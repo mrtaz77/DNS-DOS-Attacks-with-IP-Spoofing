@@ -232,6 +232,9 @@ class DNSHandler:
                 # Increment SOA serial
                 self._increment_soa_serial()
                 
+                # Invalidate cache for updated records and SOA
+                self._invalidate_updated_cache(msg.update)
+                
                 # Write updated zone to file
                 self.zone.to_file(self.zone_file, relativize=False, want_origin=True)
                 logging.info("Update applied successfully, zone file %s written", self.zone_file)
@@ -273,6 +276,26 @@ class DNSHandler:
         except Exception as e:
             logging.error("Failed to increment SOA serial: %s", e)
     
+    def _invalidate_updated_cache(self, update_sections):
+        """Invalidate cache entries for updated records and SOA"""
+        try:
+            # Always invalidate SOA since the serial was incremented
+            self.cache.remove(self.zone.origin, "SOA")
+            logging.debug("Invalidated SOA cache for %s", self.zone.origin)
+            
+            # Invalidate cache for each updated record
+            for upd in update_sections:
+                self.cache.remove(upd.name, dns.rdatatype.to_text(upd.rdtype))
+                logging.debug("Invalidated cache for %s %s", upd.name, dns.rdatatype.to_text(upd.rdtype))
+                
+            logging.info("Cache invalidated for %d updated records + SOA", len(update_sections))
+            
+        except Exception as e:
+            logging.warning("Failed to invalidate cache entries: %s", e)
+            # Fall back to clearing entire cache if selective invalidation fails
+            self.cache.clear()
+            logging.info("Fell back to clearing entire cache")
+
     def _notify_secondaries(self):
         """Send NOTIFY messages to secondary servers and force refresh"""
         # For our test setup, we know the secondary servers are on specific ports
@@ -466,6 +489,10 @@ class DNSHandler:
                             # Write updated zone
                             self.zone.to_file(self.zone_file, relativize=False, want_origin=True)
                             
+                            # Invalidate cache after IXFR update
+                            self.cache.clear()
+                            logging.info("Cache cleared after IXFR update")
+                            
                         ixfr_successful = True
                         logging.info("IXFR completed successfully")
                         
@@ -501,6 +528,11 @@ class DNSHandler:
                         
                         # Reload zone from updated file
                         self.zone = dns.zone.from_file(self.zone_file, relativize=False)
+                        
+                        # Invalidate cache after zone reload
+                        self.cache.clear()
+                        logging.info("Cache cleared after zone update from primary")
+                        
                         logging.info("Zone file updated and reloaded from primary")
                     
                     return True
