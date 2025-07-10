@@ -330,7 +330,7 @@ dig @127.0.0.1 -p 5353 www.example.com A
 ### Test Scripts
 - `test_multi_server_architecture.sh` - Complete architecture test
 - `test_rate_limiting.py` - Rate limiting and DOS protection tests
-- `verify-deployment.sh` - Multi-VM deployment verification
+
 
 ### Security Notes
 - TSIG keys should be generated per deployment
