@@ -34,6 +34,11 @@ def main():
     parser.add_argument("--primary-server", help="Primary server IP for zone transfers (required for secondary)")
     parser.add_argument("--primary-port", type=int, default=53, help="Primary server TCP port for zone transfers")
     parser.add_argument("--refresh-interval", type=int, default=3600, help="Zone refresh interval in seconds (for secondary)")
+    
+    # Rate limiting and DOS protection arguments
+    parser.add_argument("--rate-limit-threshold", type=int, default=100, help="Maximum queries per IP in time window")
+    parser.add_argument("--rate-limit-window", type=int, default=5, help="Rate limit time window in seconds")
+    parser.add_argument("--rate-limit-ban-duration", type=int, default=300, help="IP ban duration in seconds")
     args = parser.parse_args()
 
     tsig = None
@@ -49,7 +54,10 @@ def main():
         is_secondary=args.secondary,
         primary_server=args.primary_server if args.secondary else None,
         primary_port=args.primary_port if args.secondary else None,
-        refresh_interval=args.refresh_interval if args.secondary else None
+        refresh_interval=args.refresh_interval if args.secondary else None,
+        rate_limit_threshold=args.rate_limit_threshold,
+        rate_limit_window=args.rate_limit_window,
+        rate_limit_ban_duration=args.rate_limit_ban_duration
     )
 
     threads = []

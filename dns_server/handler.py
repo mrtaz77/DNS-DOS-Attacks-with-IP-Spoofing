@@ -6,11 +6,13 @@ from .utils.tsig import TSIGAuthenticator
 from .utils.cache import Cache
 from .utils.acl import ACL
 from .utils.metrics import MetricsCollector
+from .utils.rate_limiter import RateLimiter
 
 class DNSHandler:
     def __init__(self, zone_file, key_file=None, forwarder=None,
                  acl_rules=None, tsig_key=None, is_secondary=False,
-                 primary_server=None, primary_port=None, refresh_interval=None):
+                 primary_server=None, primary_port=None, refresh_interval=None,
+                 rate_limit_threshold=100, rate_limit_window=5, rate_limit_ban_duration=300):
         self.zone_file = zone_file
         self.zone = dns.zone.from_file(zone_file, relativize=False)
         self.lock = threading.Lock()
@@ -26,6 +28,13 @@ class DNSHandler:
         self.acl = ACL(**(acl_rules or {}))
         self.metrics = MetricsCollector()
         self.forwarder = forwarder
+        
+        # Initialize rate limiter with DOS protection
+        self.rate_limiter = RateLimiter(
+            threshold=rate_limit_threshold,
+            time_window=rate_limit_window,
+            ban_duration=rate_limit_ban_duration
+        )
         
         # Initialize TSIG first
         if tsig_key:
@@ -66,6 +75,14 @@ class DNSHandler:
         client_ip = addr[0] if addr else None
         logging.info("Received request from %s (%d bytes)", client_ip, len(wire or b""))
         self.metrics.inc_queries()
+        
+        # Step 1: Rate limiting check (DOS protection)
+        if client_ip and not self.rate_limiter.is_allowed(client_ip):
+            self.metrics.inc_errors()
+            logging.warning("Rate limit exceeded, dropping request from %s", client_ip)
+            return None, None
+        
+        # Step 2: ACL check
         if client_ip and not self.acl.check(client_ip):
             self.metrics.inc_errors()
             logging.warning("ACL denied request from %s", client_ip)
@@ -145,6 +162,9 @@ class DNSHandler:
                     resp.use_tsig(self.tsig.keyring, keyname=self.tsig.key_name)
                 return resp.to_wire(), None
             resp = self._do_query(msg)
+            if resp is None:
+                logging.warning("Unable to process query message")
+                return None, None
             if self.tsig and resp:
                 resp.use_tsig(self.tsig.keyring, keyname=self.tsig.key_name)
             logging.info("Answered query for %s %s", q.name, qtype)
@@ -155,6 +175,15 @@ class DNSHandler:
             return None, None
 
     def _do_query(self, msg):
+        # Check if this is actually a query message
+        if msg.opcode() != dns.opcode.QUERY:
+            logging.warning("Received non-query message with opcode %s", dns.opcode.to_text(msg.opcode()))
+            return None
+            
+        if not msg.question:
+            logging.warning("Received query message with no questions")
+            return None
+            
         resp = dns.message.make_response(msg)
         q = msg.question[0]
         try:

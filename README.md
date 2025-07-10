@@ -9,6 +9,7 @@ A comprehensive DNS server implementation supporting primary/secondary architect
 - **DNS Updates**: Dynamic updates with TSIG authentication and forwarding
 - **Multiple Protocols**: UDP, TCP, DNS-over-TLS (DoT), DNS-over-HTTPS (DoH)
 - **Security**: TSIG authentication, ACLs, secure zone transfers
+- **Rate Limiting & DOS Protection**: Configurable rate limiting with IP banning
 - **Record Types**: A, MX, SOA, NS, CNAME, TXT records
 - **Caching**: DNS response caching with TTL management
 
@@ -115,6 +116,18 @@ python -m dns_server.main \
   --port-tcp 7354
 ```
 
+### Rate Limited Server (DOS Protection)
+```bash
+python -m dns_server.main \
+  --zone dns_server/zones/primary.zone \
+  --rate-limit-threshold 50 \
+  --rate-limit-window 10 \
+  --rate-limit-ban-duration 600 \
+  --addr 0.0.0.0 \
+  --port-udp 5353 \
+  --port-tcp 5354
+```
+
 ### Forwarder Configuration
 ```bash
 python -m dns_server.main \
@@ -170,6 +183,18 @@ EOF
 python test_update.py
 ```
 
+### Rate Limiting & DOS Protection
+```bash
+# Test rate limiting features
+python test_rate_limiting.py --server 127.0.0.1 --port 5353
+
+# Test burst attack (should trigger blocking)
+python test_rate_limiting.py --test burst
+
+# Test sustained attack
+python test_rate_limiting.py --test sustained
+```
+
 ### ACL Testing
 ```bash
 # Start server with ACL denying your IP
@@ -201,6 +226,9 @@ dig @127.0.0.1 -p 5353 www.example.com A
 | `--primary-port` | Primary server TCP port | `5354` |
 | `--refresh-interval` | Zone refresh interval (seconds) | `300` |
 | `--keyfile` | DNSSEC private key | `private.key` |
+| `--rate-limit-threshold` | Max queries per IP in time window | `100` |
+| `--rate-limit-window` | Rate limit time window (seconds) | `5` |
+| `--rate-limit-ban-duration` | IP ban duration (seconds) | `300` |
 
 ## Features Status
 
@@ -212,6 +240,7 @@ dig @127.0.0.1 -p 5353 www.example.com A
 | Caching | ✅ | TTL-based |
 | ACLs | ✅ | IP-based rules |
 | TSIG | ✅ | HMAC-SHA256 |
+| Rate Limiting | ✅ | DOS protection |
 | DNSSEC | ⚠️ | Basic signing |
 | DoT/DoH | ⚠️ | TLS support |
 
@@ -228,9 +257,9 @@ dig @127.0.0.1 -p 5353 www.example.com A
 - `dns_server/zones/primary.zone` - Zone data
 
 ### Test Scripts
-- `test_tsig_authenticated.py` - TSIG validation tests
-- `test_update.py` - DNS UPDATE tests  
-- `test_axfr.py` - Zone transfer tests
+- `test_multi_server_architecture.sh` - Complete architecture test
+- `test_rate_limiting.py` - Rate limiting and DOS protection tests
+- `verify-deployment.sh` - Multi-VM deployment verification
 
 ### Security Notes
 - TSIG keys should be generated per deployment
