@@ -1,8 +1,18 @@
 $ORIGIN example.com.
-example.com. 3600 IN SOA ns1.example.com. admin.example.com. 2024071012 3600 1800 604800 3600
+example.com. 3600 IN SOA ns1.example.com. admin.example.com. 2024071018 3600 1800 604800 3600
 example.com. 3600 IN NS ns1.example.com.
-forwarded-test.example.com. 0 IN A 192.168.1.201
+batch-test1.example.com. 0 IN A 10.0.0.1
+batch-test2.example.com. 0 IN A 10.0.0.2
+batch-test3.example.com. 0 IN A 10.0.0.3
+cname-test.example.com. 0 IN CNAME www.example.com.
+forwarded1.example.com. 0 IN A 192.168.1.101
 mail.example.com. 3600 IN A 192.168.1.20
 ns1.example.com. 3600 IN A 192.168.1.1
-quick-test.example.com. 0 IN A 192.168.1.200
+rapid1.example.com. 0 IN A 192.168.1.111
+rapid2.example.com. 0 IN A 192.168.1.122
+rapid3.example.com. 0 IN A 192.168.1.133
+test.example.com. 3600 IN A 192.168.1.30
+txt-test.example.com. 0 IN TXT "This is a test TXT record"
+update1.example.com. 0 IN A 192.168.1.100
 www.example.com. 3600 IN A 192.168.1.10
+www.example.com. 3600 IN A 192.168.1.200
