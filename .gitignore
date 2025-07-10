@@ -6,7 +6,7 @@
 *.pem
 *.key
 *.crt
-
+*.tex
 
 
 # Byte-compiled / optimized / DLL files

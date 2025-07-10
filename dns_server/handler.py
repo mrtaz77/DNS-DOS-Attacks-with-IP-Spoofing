@@ -88,8 +88,35 @@ class DNSHandler:
             logging.warning("ACL denied request from %s", client_ip)
             return None, None
         try:
-            # Parse message - TSIG validation only for sensitive operations
-            msg = dns.message.from_wire(wire, keyring=self.tsig.keyring if self.tsig else None)
+            # Parse message - handle TSIG appropriately
+            keyring = self.tsig.keyring if self.tsig else None
+            try:
+                msg = dns.message.from_wire(wire, keyring=keyring)
+            except dns.tsig.BadSignature as e:
+                if keyring:
+                    logging.warning("TSIG signature validation failed: %s", e)
+                    self.metrics.inc_errors()
+                    return None, None
+                else:
+                    # No keyring configured, but message has TSIG - reject with FormErr
+                    logging.warning("Received TSIG-signed message but no TSIG key configured")
+                    self.metrics.inc_errors()
+                    # Return a FORMERR response
+                    try:
+                        temp_msg = dns.message.from_wire(wire, keyring=None, ignore_trailing=True)
+                        resp = dns.message.make_response(temp_msg)
+                        resp.set_rcode(dns.rcode.FORMERR)
+                        return resp.to_wire(), None
+                    except Exception:
+                        return None, None
+            except Exception as e:
+                if "keyring" in str(e).lower() or "tsig" in str(e).lower():
+                    logging.warning("TSIG-related parsing error: %s", e)
+                    self.metrics.inc_errors()
+                    return None, None
+                else:
+                    # Re-raise other parsing errors
+                    raise
             
             q = msg.question[0]
             qtype = dns.rdatatype.to_text(q.rdtype)
@@ -205,9 +232,25 @@ class DNSHandler:
         except KeyError:
             if self.forwarder:
                 logging.info("Forwarding query %s %s to %s", q.name, dns.rdatatype.to_text(q.rdtype), self.forwarder)
-                ans = dns.resolver.resolve(str(q.name), q.rdtype, nameservers=[self.forwarder])
-                rr = ans.rrset
-                resp.answer.append(rr)
+                try:
+                    # Create a resolver with the upstream nameserver
+                    resolver = dns.resolver.Resolver()
+                    resolver.nameservers = [self.forwarder]
+                    ans = resolver.resolve(str(q.name), q.rdtype)
+                    rr = ans.rrset
+                    resp.answer.append(rr)
+                except dns.resolver.NXDOMAIN:
+                    logging.info("NXDOMAIN from upstream for %s %s", q.name, dns.rdatatype.to_text(q.rdtype))
+                    resp.set_rcode(dns.rcode.NXDOMAIN)
+                except dns.resolver.NoAnswer:
+                    logging.info("No answer from upstream for %s %s", q.name, dns.rdatatype.to_text(q.rdtype))
+                    resp.set_rcode(dns.rcode.NOERROR)  # Empty answer section
+                except dns.resolver.Timeout:
+                    logging.warning("Timeout querying upstream %s for %s %s", self.forwarder, q.name, dns.rdatatype.to_text(q.rdtype))
+                    resp.set_rcode(dns.rcode.SERVFAIL)
+                except Exception as e:
+                    logging.error("Error querying upstream %s for %s %s: %s", self.forwarder, q.name, dns.rdatatype.to_text(q.rdtype), e)
+                    resp.set_rcode(dns.rcode.SERVFAIL)
             else:
                 logging.info("NXDOMAIN for %s %s", q.name, dns.rdatatype.to_text(q.rdtype))
                 resp.set_rcode(dns.rcode.NXDOMAIN)
