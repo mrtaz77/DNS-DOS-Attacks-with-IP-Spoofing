@@ -31,11 +31,11 @@ bash generate_tsig_key.sh    # For TSIG authentication
 bash generate_certs.sh       # For DoT/DoH
 
 # 3. Start primary server
-python -m dns_server.main --port 5353 --tcp-port 5354
+python -m dns_server.main --port-udp 5353 --port-tcp 5354
 
 # 4. Start secondary servers (in separate terminals)
-python -m dns_server.main --port 7353 --tcp-port 7354 --secondary --primary-host 127.0.0.1 --primary-port 5354
-python -m dns_server.main --port 8353 --tcp-port 8354 --secondary --primary-host 127.0.0.1 --primary-port 5354
+python -m dns_server.main --port-udp 7353 --port-tcp 7354 --secondary --primary-server 127.0.0.1 --primary-port 5354
+python -m dns_server.main --port-udp 8353 --port-tcp 8354 --secondary --primary-server 127.0.0.1 --primary-port 5354
 ```
 
 ## Server Configurations
@@ -53,10 +53,11 @@ python -m dns_server.main \
 ```bash
 python -m dns_server.main \
   --zone dns_server/zones/primary.zone \
-  --tsig-name <KEY_NAME> \
-  --tsig-secret <SECRET> \
+  --tsig-name tsig-key-1752130646 \
+  --tsig-secret dGVzdGtleXNlY3JldDEyMzQ1Njc4OTBhYmNkZWZnaGlqaw== \
   --addr 127.0.0.1 \
-  --port-udp 5353
+  --port-udp 5353 \
+  --port-tcp 5354
 ```
 
 ### ACL-Protected Server
@@ -65,7 +66,9 @@ python -m dns_server.main \
   --zone dns_server/zones/primary.zone \
   --allow 192.168.1.0/24 \
   --deny 10.0.0.0/8 \
-  --addr 0.0.0.0
+  --addr 0.0.0.0 \
+  --port-udp 5353 \
+  --port-tcp 5354
 ```
 
 ### Full-Featured Server (DoT + DoH + TSIG + ACL)
@@ -74,34 +77,52 @@ python -m dns_server.main \
   --zone dns_server/zones/primary.zone \
   --certfile dns_server/certs/cert.pem \
   --certkey dns_server/certs/key.pem \
-  --tsig-name <KEY_NAME> \
-  --tsig-secret <SECRET> \
+  --tsig-name tsig-key-1752130646 \
+  --tsig-secret dGVzdGtleXNlY3JldDEyMzQ1Njc4OTBhYmNkZWZnaGlqaw== \
   --allow 192.168.0.0/16 \
-  --addr 0.0.0.0
+  --addr 0.0.0.0 \
+  --port-udp 53 \
+  --port-tcp 53 \
+  --port-dot 853 \
+  --port-doh 443
 ```
 
 ### Primary-Secondary Setup
 
-**Primary (Master):**
+**Primary Server:**
 ```bash
 python -m dns_server.main \
   --zone dns_server/zones/primary.zone \
-  --tsig-name <KEY_NAME> \
-  --tsig-secret <SECRET> \
+  --tsig-name tsig-key-1752130646 \
+  --tsig-secret dGVzdGtleXNlY3JldDEyMzQ1Njc4OTBhYmNkZWZnaGlqaw== \
   --addr 0.0.0.0 \
-  --port-udp 53 \
-  --port-tcp 53
+  --port-udp 5353 \
+  --port-tcp 5354
 ```
 
-**Secondary (Slave):**
+**Secondary Server:**
 ```bash
 python -m dns_server.main \
-  --zone dns_server/zones/secondary.zone \
-  --forwarder <PRIMARY_IP> \
-  --tsig-name <KEY_NAME> \
-  --tsig-secret <SECRET> \
+  --zone dns_server/zones/secondary1.zone \
+  --secondary \
+  --primary-server 127.0.0.1 \
+  --primary-port 5354 \
+  --refresh-interval 300 \
+  --tsig-name tsig-key-1752130646 \
+  --tsig-secret dGVzdGtleXNlY3JldDEyMzQ1Njc4OTBhYmNkZWZnaGlqaw== \
   --addr 0.0.0.0 \
-  --port-udp 5353
+  --port-udp 7353 \
+  --port-tcp 7354
+```
+
+### Forwarder Configuration
+```bash
+python -m dns_server.main \
+  --zone dns_server/zones/primary.zone \
+  --forwarder 8.8.8.8 \
+  --addr 0.0.0.0 \
+  --port-udp 5353 \
+  --port-tcp 5354
 ```
 
 ## Testing Commands
@@ -127,7 +148,7 @@ dig @127.0.0.1 -p 5353 www.example.com A
 dig @127.0.0.1 -p 5353 example.com A
 
 # With TSIG (using dig)
-dig @127.0.0.1 -p 5353 example.com A -y <KEY_NAME>:<SECRET>
+dig @127.0.0.1 -p 5353 example.com A -y tsig-key-1752130646:dGVzdGtleXNlY3JldDEyMzQ1Njc4OTBhYmNkZWZnaGlqaw==
 
 # Python TSIG test
 python test_tsig_authenticated.py
@@ -138,9 +159,9 @@ python test_tsig_authenticated.py
 # Using nsupdate with TSIG
 nsupdate << EOF
 server 127.0.0.1 5353
-key hmac-sha256:<KEY_NAME> <SECRET>
+key hmac-sha256:tsig-key-1752130646 dGVzdGtleXNlY3JldDEyMzQ1Njc4OTBhYmNkZWZnaGlqaw==
 zone example.com
-update add testx.example.com 300 A 1.2.3.4
+update add newtest.example.com 300 A 1.2.3.4
 send
 quit
 EOF
@@ -165,16 +186,21 @@ dig @127.0.0.1 -p 5353 www.example.com A
 | `--zone` | Zone file path | `dns_server/zones/primary.zone` |
 | `--addr` | Bind address | `0.0.0.0` or `127.0.0.1` |
 | `--port-udp` | UDP port | `53` or `5353` |
-| `--port-tcp` | TCP port | `53` or `5353` |
-| `--port-tls` | DoT port | `853` |
-| `--port-https` | DoH port | `443` |
+| `--port-tcp` | TCP port | `53` or `5354` |
+| `--port-dot` | DoT port | `853` |
+| `--port-doh` | DoH port | `443` |
 | `--certfile` | TLS certificate | `dns_server/certs/cert.pem` |
 | `--certkey` | TLS private key | `dns_server/certs/key.pem` |
-| `--tsig-name` | TSIG key name | `tsig-key-123456` |
+| `--tsig-name` | TSIG key name | `tsig-key-1752130646` |
 | `--tsig-secret` | TSIG secret | `base64-encoded-secret` |
 | `--allow` | Allow networks | `192.168.1.0/24` |
 | `--deny` | Deny networks | `10.0.0.0/8` |
 | `--forwarder` | Upstream DNS | `8.8.8.8` |
+| `--secondary` | Run as secondary | Flag (no value) |
+| `--primary-server` | Primary server IP | `127.0.0.1` |
+| `--primary-port` | Primary server TCP port | `5354` |
+| `--refresh-interval` | Zone refresh interval (seconds) | `300` |
+| `--keyfile` | DNSSEC private key | `private.key` |
 
 ## Features Status
 

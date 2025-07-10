@@ -1,4 +1,5 @@
 $ORIGIN example.com.
+$TTL 3600
 example.com. 3600 IN SOA ns1.example.com. admin.example.com. 2024071018 3600 1800 604800 3600
 example.com. 3600 IN NS ns1.example.com.
 batch-test1.example.com. 0 IN A 10.0.0.1
@@ -15,4 +16,3 @@ test.example.com. 3600 IN A 192.168.1.30
 txt-test.example.com. 0 IN TXT "This is a test TXT record"
 update1.example.com. 0 IN A 192.168.1.100
 www.example.com. 3600 IN A 192.168.1.10
-www.example.com. 3600 IN A 192.168.1.200
