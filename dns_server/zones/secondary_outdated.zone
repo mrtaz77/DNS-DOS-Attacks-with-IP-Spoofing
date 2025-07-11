@@ -1,0 +1,11 @@
+$ORIGIN example.com.
+$TTL 3600
+example.com. 3600 IN SOA ns1.example.com. admin.example.com. 2021120901 3600 1800 604800 3600
+example.com. 3600 IN NS ns1.example.com.
+ns1.example.com. 3600 IN A 192.168.1.1
+www.example.com. 3600 IN A 192.168.1.2
+; This secondary zone is missing:
+; - newhost.example.com (added via UPDATE)
+; - primary-test.example.com (added via UPDATE)
+; - test.example.com (original record)
+; This simulates an outdated secondary that needs sync

@@ -1,7 +1,13 @@
-# Added
-.lh/**
-.vscode/**
-__pycache__/**
+# #secret keys
+# keys/
+# #certificates
+# certs/
+#certificate files
+*.pem
+*.key
+*.crt
+*.tex
+
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

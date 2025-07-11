@@ -1,0 +1,17 @@
+; Secondary3 Zone File for example.com
+; This file will be automatically synchronized with the primary server
+
+$ORIGIN example.com.
+$TTL 3600
+
+; Initial placeholder - will be replaced by AXFR
+@       IN      SOA     ns1.example.com. admin.example.com. (
+        2024010100      ; Serial (will be updated by transfers)
+        3600            ; Refresh
+        1800            ; Retry
+        604800          ; Expire
+        86400           ; Minimum TTL
+)
+
+; Default NS record (will be replaced by AXFR)
+@       IN      NS      ns1.example.com.
