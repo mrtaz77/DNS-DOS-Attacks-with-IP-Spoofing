@@ -175,12 +175,19 @@ class UDPFragmentFloodSimulation:
             )
             log_file.write("=" * 70 + "\n")
 
+            sample_requests = [
+                "batch-test1.example.com",
+                "ns1.example.com",
+                "www.google.com",
+                "rapid1.example.com"
+            ]
+
             while not self.stop_event.is_set():
                 try:
                     start_time = time.time()
 
                     # Create DNS query for legitimate domain
-                    query_name = f"test{request_count % 10}.example.com"
+                    query_name = sample_requests[request_count % 4]
                     query = dns.message.make_query(query_name, "A")
 
                     # Send query with timeout
@@ -428,7 +435,7 @@ class UDPFragmentFloodSimulation:
     def _perform_fragment_monitoring_query(self):
         """Perform DNS query to monitor fragment attack impact"""
         start_time = time.time()
-        query = dns.message.make_query("fragment-monitor.example.com", "A")
+        query = dns.message.make_query("test.example.com", "A")
 
         try:
             dns.query.udp(query, self.server_ip, port=self.server_port, timeout=3)
