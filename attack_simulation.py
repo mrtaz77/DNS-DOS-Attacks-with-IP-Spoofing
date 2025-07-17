@@ -222,13 +222,16 @@ class AttackSimulation:
             if self.attack_type == "udp-fragment":
                 from attack.udp_fragmented_flood import FragmentedUDPFlood
 
+                min_packet_size = int("Minimum packet size: ")
+                max_packet_size = int("Maximum packet size: ")
+
                 attack = FragmentedUDPFlood(
                     target_ip=self.server_ip,
                     target_port=self.server_port,
                     duration=self.attack_duration,
                     threads=self.attack_threads,
-                    min_packet_size=3000,
-                    max_packet_size=12000
+                    min_packet_size=min_packet_size,
+                    max_packet_size=max_packet_size
                 )
             elif self.attack_type == "udp-fraggle":
                 from attack.udp_fraggle import UDPFraggle
