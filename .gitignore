@@ -1,13 +1,12 @@
-# #secret keys
-# keys/
-# #certificates
-# certs/
-#certificate files
+# Added
 *.pem
 *.key
 *.crt
 *.tex
-
+.lh/*
+.vscode/*
+*.aux
+*.fdb_latexmk
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

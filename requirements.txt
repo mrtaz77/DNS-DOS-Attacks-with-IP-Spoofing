@@ -1,22 +1,4 @@
-# DNS handling and network operations
-dnspython>=2.3.0
-
-# Cryptography for DNSSEC operations and SSL/TLS
-cryptography>=3.4.8
-
-# Data visualization for experiments
-matplotlib>=3.5.0
-
-# Diagram generation (optional, for flowchart.py)
-graphviz>=0.20.0
-
-# Standard library modules (included with Python, no install needed):
-# - socket
-# - ssl  
-# - argparse
-# - time
-# - concurrent.futures
-# - uuid
-# - copy
-# - re
-# - collections
+cryptography==41.0.1
+dnspython==2.7.0
+redis==6.2.0
+colorama==0.4.6

@@ -10,9 +10,9 @@ from .utils.rate_limiter import RateLimiter
 
 class DNSHandler:
     def __init__(self, zone_file, key_file=None, forwarder=None,
-                 acl_rules=None, tsig_key=None, is_secondary=False,
-                 primary_server=None, primary_port=None, refresh_interval=None,
-                 rate_limit_threshold=100, rate_limit_window=5, rate_limit_ban_duration=300):
+                acl_rules=None, tsig_key=None, is_secondary=False,
+                primary_server=None, primary_port=None, refresh_interval=None,
+                rate_limit_threshold=100, rate_limit_window=5, rate_limit_ban_duration=300):
         self.zone_file = zone_file
         self.zone = dns.zone.from_file(zone_file, relativize=False)
         self.lock = threading.Lock()
