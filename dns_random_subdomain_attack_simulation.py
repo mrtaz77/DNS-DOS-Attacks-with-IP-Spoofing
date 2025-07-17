@@ -78,7 +78,7 @@ class DNSSubdomainFloodSimulation:
             "www.leetcode.com"
         ]
 
-        self.base_domains = ["example.com", "test.com", "demo.com"]
+        self.base_domains = ["example.com", "google.com", "test.com"]
 
         os.makedirs(f"{LOGGING_DIR}", exist_ok=True)
 
