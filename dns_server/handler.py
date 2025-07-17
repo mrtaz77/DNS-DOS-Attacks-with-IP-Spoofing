@@ -1,6 +1,6 @@
 import threading, copy, time
 import logging
-import dns.message, dns.zone, dns.dnssec, dns.update, dns.resolver  # type: ignore
+import dns.message, dns.zone, dns.dnssec, dns.update, dns.resolver, dns.query  # type: ignore
 from cryptography.hazmat.primitives import serialization
 from .utils.tsig import TSIGAuthenticator
 from .utils.cache import Cache
@@ -117,6 +117,12 @@ class DNSHandler:
                 else:
                     # Re-raise other parsing errors
                     raise
+            
+            # Validate that the message has questions
+            if not msg.question:
+                logging.warning("Received DNS message with no questions from %s, ignoring", client_ip)
+                self.metrics.inc_errors()
+                return None, None
             
             q = msg.question[0]
             qtype = dns.rdatatype.to_text(q.rdtype)
@@ -467,8 +473,6 @@ class DNSHandler:
             return False
             
         try:
-            import dns.query
-            
             # Get current SOA serial
             zone_name = self.zone.origin
             current_serial = 0
@@ -596,11 +600,15 @@ class DNSHandler:
             logging.error("Cannot forward UPDATE: no primary server configured")
             return None
             
+        if not msg.question:
+            logging.error("Cannot forward UPDATE: no questions in message")
+            return None
+            
         try:
             logging.info("Secondary server forwarding DNS UPDATE for %s to primary", 
-                        msg.question[0].name if msg.question else "unknown")
+                        msg.question[0].name)
             logging.info("Secondary server forwarding DNS UPDATE for %s to primary %s:%d", 
-                        msg.question[0].name if msg.question else "unknown", 
+                        msg.question[0].name, 
                         self.primary_server, self.primary_port)
             
             # Create a fresh message copy to avoid TSIG conflicts
