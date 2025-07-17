@@ -800,14 +800,6 @@ class DNSSubdomainFloodSimulation:
             f"\tService Disruption: {'✅ YES' if dos['service_disruption_detected'] else '❌ NO'}"
         )
         print(f"\tMax Degradation: {dos['max_response_degradation']}%")
-        print(f"\tCache Pollution Risk: {dos['cache_pollution_potential']}")
-        print(f"\tAmplification Factor: {dos['amplification_factor']}x")
-
-        print(f"\n📁 Detailed logs saved in: {LOGGING_DIR}/ directory")
-        print("\t- target_dns_server.log: Target DNS server activity")
-        print("\t- legitimate_client.log: Client experience during attack")
-        print("\t- attack.log: Attack execution details")
-        print("\t- dos_monitoring.log: Service degradation metrics")
         print("=" * 90)
 
     def generate_comprehensive_report(self):
