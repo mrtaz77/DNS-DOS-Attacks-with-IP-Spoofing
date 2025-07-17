@@ -171,7 +171,15 @@ class FragmentedUDPFlood(AttackStrategy):
     6. Incomplete/delayed fragments waste memory until timeout
     """
 
-    def __init__(self, target_ip, target_port, duration=60, threads=20, min_packet_size=1500, max_packet_size=8000):
+    def __init__(
+        self,
+        target_ip,
+        target_port,
+        duration=60,
+        threads=20,
+        min_packet_size=1500,
+        max_packet_size=8000,
+    ):
         super().__init__(target_ip, target_port, duration, threads)
         self.fragment_size = 1480
         self.max_packet_size = max_packet_size
