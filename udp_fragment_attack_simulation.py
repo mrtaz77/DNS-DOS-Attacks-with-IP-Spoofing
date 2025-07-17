@@ -827,7 +827,7 @@ Examples:
         "--duration",
         "-d",
         type=int,
-        default=60,
+        default=30,
         help="Attack duration in seconds (default: 60)",
     )
 
