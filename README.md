@@ -23,12 +23,6 @@ This project implements various types of Denial of Service (DoS) and Distributed
 - **Features**: Out-of-order fragment delivery, proper fragmentation handling
 - **Documentation**: `UDP_FRAGMENTED_FLOOD_DOCUMENTATION.md`
 
-### 2. UDP Fraggle Attack
-- **File**: `attack/udp_fraggle.py`
-- **Description**: Network amplification attack using UDP broadcast packets
-- **Features**: Broadcast targeting, service amplification, spoofed source IPs
-- **Documentation**: `UDP_FRAGGLE_DOCUMENTATION.md`
-
 ### Common Features
 - **Logging**: Centralized logging with different severity levels
 - **Colored Output**: Visual feedback with colored terminal output
@@ -55,38 +49,14 @@ pip install colorama
 
 ### Direct Execution
 ```bash
-# TCP SYN Flood
-python attack/tcp_syn_flood.py
-
 # UDP Fragmented Flood
 python attack/udp_fragmented_flood.py
 
-# UDP Fraggle Attack
-python attack/udp_fraggle.py
 ```
 
 ### Test Scripts
 ```bash
-# Run interactive test scripts
-python tests/test_tcp_syn_flood.py
 python tests/test_udp_fragmented_flood.py
-python tests/test_udp_fraggle.py
-```
-
-### Programmatic Usage
-```python
-from attack.tcp_syn_flood import TCPSynFlood
-
-# Create attack instance
-attack = TCPSynFlood(
-    target_ip="192.168.1.100",
-    target_port=80,
-    duration=60,
-    threads=50
-)
-
-# Execute attack
-attack.attack()
 ```
 
 ## Configuration
@@ -117,49 +87,6 @@ attack.attack()
 - Use rate limiting and traffic shaping
 - Monitor for unusual traffic patterns
 - Deploy intrusion detection systems
-
-## Project Structure
-
-```
-DNS-DOS-Attacks-with-IP-Spoofing/
-├── attack/
-│   ├── attack_strategy.py          # Base class for all attacks
-│   ├── constants.py                # Common constants
-│   ├── tcp_syn_flood.py           # TCP SYN flood implementation
-│   ├── udp_fragmented_flood.py    # UDP fragmented flood implementation
-│   ├── udp_fraggle.py             # UDP Fraggle attack implementation
-│   ├── icmp_ping_flood.py         # ICMP ping flood (in development)
-│   ├── icmp_smurf.py              # ICMP Smurf attack (in development)
-│   └── malformed_udp_query_flood.py # Malformed UDP queries (in development)
-├── tests/
-│   ├── test_tcp_syn_flood.py      # TCP SYN flood test script
-│   ├── test_udp_fragmented_flood.py # UDP fragmented flood test script
-│   └── test_udp_fraggle.py        # UDP Fraggle test script
-├── UDP_FRAGMENTED_FLOOD_DOCUMENTATION.md
-├── UDP_FRAGGLE_DOCUMENTATION.md
-├── REFACTORING_SUMMARY.md
-└── README.md
-```
-
-## Documentation
-
-- **UDP_FRAGMENTED_FLOOD_DOCUMENTATION.md**: Detailed UDP fragmented flood attack documentation
-- **UDP_FRAGGLE_DOCUMENTATION.md**: Comprehensive UDP Fraggle attack documentation
-- **REFACTORING_SUMMARY.md**: Summary of code refactoring and architecture decisions
-- **Source Code Comments**: Extensive in-line documentation with RFC-style packet structure diagrams
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Implement your attack following the established patterns
-4. Add comprehensive documentation
-5. Include test scripts
-6. Submit a pull request
-
-## License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
 
 ## Disclaimer
 
