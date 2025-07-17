@@ -183,11 +183,14 @@ class AttackStrategy(ABC):
         
         # Attack effectiveness assessment
         if avg_rate > 1000:
-            self._print_success("✓ High intensity attack - Likely effective")
+            self._print_success("✓ HIGH INTENSITY - Likely effective")
         elif avg_rate > 500:
-            self._print_warning("⚠ Medium intensity attack - Moderately effective")
+            self._print_warning("⚠ MEDIUM INTENSITY - Moderately effective")
         else:
-            self._print_error("✗ Low intensity attack - May not be effective")
+            self._print_error("✗ LOW INTENSITY - May not be effective")
+
+        estimated_bandwidth = (avg_rate * 1500 * 8) / 1000000
+        self._print_info(f"Estimated bandwidth usage: {estimated_bandwidth:.2f} Mbps")
 
     def _get_rate_color(self, rate):
         """
