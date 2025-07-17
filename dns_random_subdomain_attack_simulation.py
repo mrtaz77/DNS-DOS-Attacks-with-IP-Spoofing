@@ -15,7 +15,7 @@ import argparse
 import random
 import string
 
-LOGGING_DIR = 'dns-random-subdomain'
+LOGGING_DIR = "dns-random-subdomain"
 
 # Setup logging
 logging.basicConfig(
@@ -37,12 +37,7 @@ class DNSSubdomainFloodSimulation:
     2. TARGET DNS SERVER: Primary victim (resolver/recursive server)
     3. LEGITIMATE DNS CLIENTS: Collateral victims experiencing service degradation
 
-    Attack Flow:
-    - Attacker floods target with random subdomain queries (abc123.example.com)
-    - Target server performs recursive lookups to external DNS (8.8.8.8)
-    - External servers respond with NXDOMAIN for non-existent subdomains
-    - Processing overhead overwhelms target server
-    - Legitimate clients experience slow/failed DNS resolution
+    Attack Flow\t- Attacker floods target with random subdomain queries (abc123.example.com\t- Target server performs recursive lookups to external DNS (8.8.8.8\t- External servers respond with NXDOMAIN for non-existent subdomain\t- Processing overhead overwhelms target serve\t- Legitimate clients experience slow/failed DNS resolution
     """
 
     def __init__(
@@ -170,18 +165,85 @@ class DNSSubdomainFloodSimulation:
             logging.error(f"[{thread_name}] Failed to start target DNS server: {e}")
             self.results_queue.put(("target_dns_error", str(e)))
 
+    def _determine_client_phase(self, elapsed_time):
+        if elapsed_time < 15:
+            return "BASELINE"
+        elif elapsed_time < (15 + self.attack_duration):
+            return "UNDER_ATTACK"
+        else:
+            return "POST_ATTACK_RECOVERY"
+
+    def _send_dns_query_and_time(self, query_name):
+        query = dns.message.make_query(query_name, "A")
+        start_time = time.time()
+        dns.query.udp(query, self.server_ip, port=self.target_server_port, timeout=8)
+        end_time = time.time()
+        return (end_time - start_time) * 1000  # ms
+
+    def _log_and_store_client_metrics(
+        self,
+        log_file,
+        request_count,
+        query_name,
+        response_time,
+        status,
+        client_phase,
+        error=None,
+    ):
+        timestamp = datetime.now()
+        if error:
+            log_entry = f"[{timestamp}] [{client_phase}] Query {request_count}: {query_name} FAILED - {error}\n"
+        else:
+            log_entry = f"[{timestamp}] [{client_phase}] Query {request_count}: {query_name} -> {response_time:.2f}ms ({status})\n"
+        log_file.write(log_entry)
+        log_file.flush()
+        metric = {
+            "timestamp": time.time(),
+            "query": query_name,
+            "response_time_ms": response_time if not error else 0,
+            "status": status if not error else "FAILED",
+            "degraded": (response_time > 1000) if not error else True,
+            "phase": client_phase,
+        }
+        if error:
+            metric["error"] = str(error)
+        self.metrics["client_requests"].append(metric)
+
+    def _get_status_from_response_time(self, response_time):
+        if response_time > 2000:
+            return "SUCCESS_VERY_SLOW"
+        elif response_time > 1000:
+            return "SUCCESS_SLOW"
+        else:
+            return "SUCCESS"
+
+    def _log_slow_and_recovery(
+        self, thread_name, client_phase, query_name, response_time
+    ):
+        if response_time > 1000:
+            logging.warning(
+                f"[{thread_name}] [{client_phase}] SLOW RESPONSE: {query_name} -> {response_time:.2f}ms"
+            )
+        else:
+            logging.debug(
+                f"[{thread_name}] [{client_phase}] Query: {query_name} -> {response_time:.2f}ms"
+            )
+        if client_phase == "POST_ATTACK_RECOVERY" and response_time < 500:
+            logging.info(
+                f"[{thread_name}] 🔄 SERVICE RECOVERY: {query_name} -> {response_time:.2f}ms (Normal response time restored)"
+            )
+
     def legitimate_client_thread(self):
         """Thread 2: Legitimate DNS Client - Collateral Victim"""
         thread_name = "Legitimate-Client"
         logging.info(f"[{thread_name}] Starting legitimate client requests")
 
-        # Wait for DNS servers to start
         time.sleep(5)
-
         request_count = 0
         successful_requests = 0
         failed_requests = 0
         response_times = []
+        phase_start_time = time.time()
 
         with open(f"{LOGGING_DIR}/legitimate_client.log", "w") as log_file:
             log_file.write(f"Legitimate DNS Client started at {datetime.now()}\n")
@@ -194,81 +256,44 @@ class DNSSubdomainFloodSimulation:
             log_file.write("=" * 70 + "\n")
 
             while not self.stop_event.is_set():
+                query_name = self.legitimate_domains[
+                    request_count % len(self.legitimate_domains)
+                ]
+                elapsed = time.time() - phase_start_time
+                client_phase = self._determine_client_phase(elapsed)
                 try:
-                    start_time = time.time()
-
-                    # Query legitimate domains that should exist
-                    query_name = self.legitimate_domains[
-                        request_count % len(self.legitimate_domains)
-                    ]
-                    query = dns.message.make_query(query_name, "A")
-
-                    # Send query to target DNS server (the victim)
-                    dns.query.udp(
-                        query, self.server_ip, port=self.target_server_port, timeout=8
-                    )
-
-                    end_time = time.time()
-                    response_time = (end_time - start_time) * 1000  # Convert to ms
-
+                    response_time = self._send_dns_query_and_time(query_name)
                     successful_requests += 1
                     response_times.append(response_time)
-
-                    # Determine if this is slow (degraded service)
-                    status = "SUCCESS"
-                    if response_time > 1000:  # > 1 second
-                        status = "SUCCESS_SLOW"
-                    elif response_time > 2000:  # > 2 seconds
-                        status = "SUCCESS_VERY_SLOW"
-
-                    log_entry = f"[{datetime.now()}] Query {request_count}: {query_name} -> {response_time:.2f}ms ({status})\n"
-                    log_file.write(log_entry)
-                    log_file.flush()
-
-                    # Store metrics
-                    self.metrics["client_requests"].append(
-                        {
-                            "timestamp": time.time(),
-                            "query": query_name,
-                            "response_time_ms": response_time,
-                            "status": status,
-                            "degraded": response_time > 1000,
-                        }
+                    status = self._get_status_from_response_time(response_time)
+                    self._log_and_store_client_metrics(
+                        log_file,
+                        request_count,
+                        query_name,
+                        response_time,
+                        status,
+                        client_phase,
                     )
-
-                    if response_time > 1000:
-                        logging.warning(
-                            f"[{thread_name}] SLOW RESPONSE: {query_name} -> {response_time:.2f}ms"
-                        )
-                    else:
-                        logging.debug(
-                            f"[{thread_name}] Query {request_count}: {response_time:.2f}ms"
-                        )
-
+                    self._log_slow_and_recovery(
+                        thread_name, client_phase, query_name, response_time
+                    )
                 except Exception as e:
                     failed_requests += 1
-                    log_entry = f"[{datetime.now()}] Query {request_count}: {query_name} FAILED - {str(e)}\n"
-                    log_file.write(log_entry)
-                    log_file.flush()
-
-                    # Store failed request
-                    self.metrics["client_requests"].append(
-                        {
-                            "timestamp": time.time(),
-                            "query": query_name,
-                            "response_time_ms": 0,
-                            "status": "FAILED",
-                            "error": str(e),
-                            "degraded": True,
-                        }
+                    self._log_and_store_client_metrics(
+                        log_file,
+                        request_count,
+                        query_name,
+                        0,
+                        "FAILED",
+                        client_phase,
+                        error=str(e),
                     )
-
-                    logging.error(f"[{thread_name}] Query {request_count} FAILED: {e}")
-
+                    logging.error(
+                        f"[{thread_name}] [{client_phase}] Query {request_count} FAILED: {e}"
+                    )
                 request_count += 1
-                time.sleep(2)  # Request every 2 seconds (normal user behavior)
+                time.sleep(2)
 
-        # Calculate final statistics
         total_requests = successful_requests + failed_requests
         success_rate = (
             (successful_requests / total_requests * 100) if total_requests > 0 else 0
@@ -277,7 +302,18 @@ class DNSSubdomainFloodSimulation:
         degraded_requests = len(
             [r for r in self.metrics["client_requests"] if r.get("degraded", False)]
         )
-
+        post_attack_requests = [
+            r
+            for r in self.metrics["client_requests"]
+            if r.get("phase") == "POST_ATTACK_RECOVERY"
+        ]
+        recovery_success = len(
+            [
+                r
+                for r in post_attack_requests
+                if r["status"] in ["SUCCESS"] and r["response_time_ms"] < 500
+            ]
+        )
         stats = {
             "total_requests": total_requests,
             "successful": successful_requests,
@@ -288,10 +324,16 @@ class DNSSubdomainFloodSimulation:
             "degradation_rate": (
                 (degraded_requests / total_requests * 100) if total_requests > 0 else 0
             ),
+            "post_attack_requests": len(post_attack_requests),
+            "recovery_success_count": recovery_success,
+            "service_recovery_rate": (
+                (recovery_success / len(post_attack_requests) * 100)
+                if post_attack_requests
+                else 0
+            ),
         }
-
         self.results_queue.put(("client_stats", stats))
-        logging.info(f"[{thread_name}] Client impact: {stats}")
+        logging.info(f"[{thread_name}] Final client impact analysis: {stats}")
 
     def dns_subdomain_flood_attack_thread(self):
         """Thread 3: DNS Random Subdomain Query Flood Attack - The Attacker"""
@@ -333,9 +375,7 @@ class DNSSubdomainFloodSimulation:
                 log_file.write(
                     f"Target: {self.server_ip}:{self.target_server_port} (Target DNS Server)\n"
                 )
-                log_file.write(
-                    "External Forwarder: 8.8.8.8 (Google DNS)\n"
-                )
+                log_file.write("External Forwarder: 8.8.8.8 (Google DNS)\n")
                 log_file.write(f"Duration: {self.attack_duration} seconds\n")
                 log_file.write(f"Threads: {self.attack_threads}\n")
                 log_file.write(f"Base Domains: {self.base_domains}\n")
@@ -685,8 +725,6 @@ class DNSSubdomainFloodSimulation:
             "attack_detected": len(self.metrics["during_attack"]) > 0,
             "max_response_degradation": 0,
             "service_disruption_detected": False,
-            "cache_pollution_potential": "HIGH",
-            "amplification_factor": 1.0,
         }
 
         if self.metrics["baseline"] and self.metrics["during_attack"]:
@@ -703,16 +741,6 @@ class DNSSubdomainFloodSimulation:
                 degradation > 300
             )  # 300% degradation threshold
 
-        # Calculate amplification factor (queries sent vs processing required)
-        if (
-            "attack_stats" in self.metrics
-            and "dns_queries_sent" in self.metrics["attack_stats"]
-        ):
-            queries_sent = self.metrics["attack_stats"]["dns_queries_sent"]
-            # Each query forces external DNS lookup + NXDOMAIN response processing
-            dos_data["amplification_factor"] = 2.0  # Conservative estimate
-            dos_data["estimated_external_server_load"] = queries_sent * 2
-
         return dos_data
 
     def _print_dns_report_summary(self, report):
@@ -721,63 +749,65 @@ class DNSSubdomainFloodSimulation:
         print("🎯 DNS RANDOM SUBDOMAIN QUERY FLOOD ATTACK SIMULATION REPORT")
         print("=" * 90)
         print("📦 ATTACK METHOD: DNS Random Subdomain Query Flood")
-        print("   - Random subdomain queries (abc123.example.com, xyz789.test.com)")
-        print("   - IP spoofing for distributed appearance")
-        print("   - Forces cache misses and recursive lookups")
-        print("   - Overwhelms DNS resolver processing capacity")
-        print("   - Generates NXDOMAIN responses from external DNS (8.8.8.8)")
+        print("\t- Random subdomain queries (abc123.example.com, xyz789.test.com)")
+        print("\t- IP spoofing for distributed appearance")
+        print("\t- Forces cache misses and recursive lookups")
+        print("\t- Overwhelms DNS resolver processing capacity")
+        print("\t- Generates NXDOMAIN responses from external DNS (8.8.8.8)")
 
         if "attack_stats" in self.metrics:
             stats = self.metrics["attack_stats"]
             print("\n🔥 ATTACK STATISTICS:")
-            print(f"   DNS Queries Sent: {stats.get('dns_queries_sent', 0)}")
-            print(f"   Attack Duration: {stats.get('duration', 0):.2f} seconds")
-            print(f"   Attack Threads: {stats.get('threads', 0)}")
-            print(f"   Target Server: {stats.get('target', 'Unknown')}")
-            print(f"   External Forwarder: {stats.get('external_forwarder', 'Unknown')}")
+            print(f"\tDNS Queries Sent: {stats.get('dns_queries_sent', 0)}")
+            print(f"\tAttack Duration: {stats.get('duration', 0):.2f} seconds")
+            print(f"\tAttack Threads: {stats.get('threads', 0)}")
+            print(f"\tTarget Server: {stats.get('target', 'Unknown')}")
+            print(
+                f"\tExternal Forwarder: {stats.get('external_forwarder', 'Unknown')}"
+            )
 
         if report["baseline_performance"]:
             baseline = report["baseline_performance"]
             print("\n📊 BASELINE DNS PERFORMANCE:")
-            print(f"   Average Response Time: {baseline['avg_response_time_ms']}ms")
-            print(f"   NXDOMAIN Rate: {baseline['nxdomain_rate_percent']}%")
-            print(f"   Failure Rate: {baseline['failure_rate_percent']}%")
+            print(f"\tAverage Response Time: {baseline['avg_response_time_ms']}ms")
+            print(f"\tNXDOMAIN Rate: {baseline['nxdomain_rate_percent']}%")
+            print(f"\tFailure Rate: {baseline['failure_rate_percent']}%")
 
         if report["attack_impact"]:
             impact = report["attack_impact"]
             print("\n🚨 DNS ATTACK IMPACT:")
-            print(f"   Average Response Time: {impact['avg_response_time_ms']}ms")
-            print(f"   Max Response Time: {impact['max_response_time_ms']}ms")
-            print(f"   Failure Rate: {impact['failure_rate_percent']}%")
-            print(f"   Timeout Rate: {impact['timeout_rate_percent']}%")
+            print(f"\tAverage Response Time: {impact['avg_response_time_ms']}ms")
+            print(f"\tMax Response Time: {impact['max_response_time_ms']}ms")
+            print(f"\tFailure Rate: {impact['failure_rate_percent']}%")
+            print(f"\tTimeout Rate: {impact['timeout_rate_percent']}%")
             if "performance_degradation_percent" in impact:
                 print(
-                    f"   Performance Degradation: {impact['performance_degradation_percent']}%"
+                    f"\tPerformance Degradation: {impact['performance_degradation_percent']}%"
                 )
 
         if report["client_impact"]:
             client = report["client_impact"]
             print("\n👥 LEGITIMATE CLIENT IMPACT:")
-            print(f"   Success Rate: {client['success_rate_percent']}%")
-            print(f"   Service Degradation: {client['degradation_rate_percent']}%")
-            print(f"   Failed Requests: {client['failed_requests']}")
-            print(f"   Average Response Time: {client['avg_response_time_ms']}ms")
+            print(f"\tSuccess Rate: {client['success_rate_percent']}%")
+            print(f"\tService Degradation: {client['degradation_rate_percent']}%")
+            print(f"\tFailed Requests: {client['failed_requests']}")
+            print(f"\tAverage Response Time: {client['avg_response_time_ms']}ms")
 
         print("\n🔍 DNS DoS DETECTION:")
         dos = report["dns_dos_indicators"]
-        print(f"   Attack Detected: {'✅ YES' if dos['attack_detected'] else '❌ NO'}")
+        print(f"\tAttack Detected: {'✅ YES' if dos['attack_detected'] else '❌ NO'}")
         print(
-            f"   Service Disruption: {'✅ YES' if dos['service_disruption_detected'] else '❌ NO'}"
+            f"\tService Disruption: {'✅ YES' if dos['service_disruption_detected'] else '❌ NO'}"
         )
-        print(f"   Max Degradation: {dos['max_response_degradation']}%")
-        print(f"   Cache Pollution Risk: {dos['cache_pollution_potential']}")
-        print(f"   Amplification Factor: {dos['amplification_factor']}x")
+        print(f"\tMax Degradation: {dos['max_response_degradation']}%")
+        print(f"\tCache Pollution Risk: {dos['cache_pollution_potential']}")
+        print(f"\tAmplification Factor: {dos['amplification_factor']}x")
 
-        print("\n📁 Detailed logs saved in: logs/ directory")
-        print("   - target_dns_server.log: Target DNS server activity")
-        print("   - legitimate_client.log: Client experience during attack")
-        print("   - attack.log: Attack execution details")
-        print("   - dos_monitoring.log: Service degradation metrics")
+        print(f"\n📁 Detailed logs saved in: {LOGGING_DIR}/ directory")
+        print("\t- target_dns_server.log: Target DNS server activity")
+        print("\t- legitimate_client.log: Client experience during attack")
+        print("\t- attack.log: Attack execution details")
+        print("\t- dos_monitoring.log: Service degradation metrics")
         print("=" * 90)
 
     def generate_comprehensive_report(self):
@@ -880,22 +910,47 @@ class DNSSubdomainFloodSimulation:
 
             logging.info("All threads started successfully - DNS simulation running")
 
+            # Show phases of simulation
+            print("\n📍 SIMULATION PHASES:")
+            print("Phase 1: Baseline measurement (15 seconds)")
+            print(
+                f"Phase 2: DNS Subdomain Flood Attack ({self.attack_duration} seconds)"
+            )
+            print("Phase 3: Post-attack recovery monitoring (30 seconds)")
+            print("=" * 90)
+
             # Wait for attack thread to complete (determines simulation end)
             threads[2].join()  # Wait for DNS attack thread
             logging.info("DNS subdomain flood attack thread completed")
+            print("\n🔥 DNS ATTACK PHASE COMPLETED")
+            print("🔍 Continuing post-attack monitoring and recovery assessment...")
 
-            # Allow time for post-attack monitoring and recovery assessment
-            time.sleep(15)
+            # Extended post-attack monitoring period (30 seconds)
+            post_attack_duration = 30
+            logging.info(
+                f"Starting {post_attack_duration}s post-attack monitoring period"
+            )
+
+            for remaining in range(post_attack_duration, 0, -5):
+                print(f"⏱️  Post-attack monitoring: {remaining}s remaining...")
+                time.sleep(5)
+
+            print("✅ Post-attack monitoring completed")
 
             # Signal stop and wait for other threads
             self.stop_event.set()
+            logging.info("Signaling all threads to stop gracefully")
 
+            # Wait for threads to complete gracefully with longer timeout
             for i, thread in enumerate(threads):
                 if i != 2:  # Skip attack thread (already completed)
-                    thread.join(timeout=15)
+                    thread.join(timeout=20)  # Increased timeout for graceful shutdown
                     if thread.is_alive():
                         logging.warning(f"{thread.name} did not stop gracefully")
+                    else:
+                        logging.info(f"{thread.name} stopped successfully")
 
+            print("\n📊 Generating comprehensive attack report...")
             # Generate comprehensive DNS attack report
             self.generate_comprehensive_report()
 
