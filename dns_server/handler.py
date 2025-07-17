@@ -1,6 +1,6 @@
 import threading, copy, time
 import logging
-import dns.message, dns.zone, dns.dnssec, dns.update, dns.resolver, dns.query  # type: ignore
+import dns.message, dns.zone, dns.dnssec, dns.update, dns.resolver, dns.query, dns.exception  # type: ignore
 from cryptography.hazmat.primitives import serialization
 from .utils.tsig import TSIGAuthenticator
 from .utils.cache import Cache
@@ -27,7 +27,22 @@ class DNSHandler:
         self.cache = Cache()
         self.acl = ACL(**(acl_rules or {}))
         self.metrics = MetricsCollector()
-        self.forwarder = forwarder
+        
+        # Parse forwarder - extract IP and port if IP:port format is used
+        if forwarder:
+            if ':' in forwarder:
+                # Extract IP and port from IP:port format
+                parts = forwarder.split(':')
+                self.forwarder = parts[0]
+                self.forwarder_port = int(parts[1])
+                logging.info("Forwarder configured: %s:%d (from %s)", self.forwarder, self.forwarder_port, forwarder)
+            else:
+                self.forwarder = forwarder
+                self.forwarder_port = 53  # Default DNS port
+                logging.info("Forwarder configured: %s:%d", self.forwarder, self.forwarder_port)
+        else:
+            self.forwarder = forwarder
+            self.forwarder_port = 53
         
         # Initialize rate limiter with DOS protection
         self.rate_limiter = RateLimiter(
@@ -216,8 +231,17 @@ class DNSHandler:
         if not msg.question:
             logging.warning("Received query message with no questions")
             return None
+        
+        # Check if this is a valid query that can have a response made
+        try:
+            resp = dns.message.make_response(msg)
+        except dns.exception.FormError as e:
+            logging.warning("Cannot create response for message: %s", e)
+            return None
+        except Exception as e:
+            logging.warning("Unexpected error creating response: %s", e)
+            return None
             
-        resp = dns.message.make_response(msg)
         q = msg.question[0]
         try:
             # Try to find the node first
@@ -237,25 +261,40 @@ class DNSHandler:
                 raise KeyError
         except KeyError:
             if self.forwarder:
-                logging.info("Forwarding query %s %s to %s", q.name, dns.rdatatype.to_text(q.rdtype), self.forwarder)
+                logging.info("Forwarding query %s %s to %s:%d", q.name, dns.rdatatype.to_text(q.rdtype), self.forwarder, self.forwarder_port)
                 try:
-                    # Create a resolver with the upstream nameserver
-                    resolver = dns.resolver.Resolver()
-                    resolver.nameservers = [self.forwarder]
-                    ans = resolver.resolve(str(q.name), q.rdtype)
-                    rr = ans.rrset
-                    resp.answer.append(rr)
+                    # Create a query message for forwarding
+                    forward_query = dns.message.make_query(q.name, q.rdtype, q.rdclass)
+                    
+                    # Forward using UDP first, fall back to TCP if needed
+                    try:
+                        response = dns.query.udp(forward_query, self.forwarder, port=self.forwarder_port, timeout=5)
+                    except dns.exception.Timeout:
+                        # Try TCP on timeout
+                        response = dns.query.tcp(forward_query, self.forwarder, port=self.forwarder_port, timeout=5)
+                    
+                    # Extract answer from response
+                    if response.answer:
+                        for rr in response.answer:
+                            if rr.rdtype == q.rdtype:
+                                resp.answer.append(rr)
+                                break
+                        if not resp.answer:
+                            # Add first answer even if type doesn't match exactly
+                            resp.answer.append(response.answer[0])
+                    else:
+                        # No answer in response
+                        resp.set_rcode(response.rcode())
+                        
                 except dns.resolver.NXDOMAIN:
                     logging.info("NXDOMAIN from upstream for %s %s", q.name, dns.rdatatype.to_text(q.rdtype))
                     resp.set_rcode(dns.rcode.NXDOMAIN)
-                except dns.resolver.NoAnswer:
-                    logging.info("No answer from upstream for %s %s", q.name, dns.rdatatype.to_text(q.rdtype))
-                    resp.set_rcode(dns.rcode.NOERROR)  # Empty answer section
-                except dns.resolver.Timeout:
-                    logging.warning("Timeout querying upstream %s for %s %s", self.forwarder, q.name, dns.rdatatype.to_text(q.rdtype))
+                except (dns.exception.Timeout, OSError) as e:
+                    logging.warning("Timeout/connection error querying upstream %s:%d for %s %s: %s", 
+                                  self.forwarder, self.forwarder_port, q.name, dns.rdatatype.to_text(q.rdtype), e)
                     resp.set_rcode(dns.rcode.SERVFAIL)
                 except Exception as e:
-                    logging.error("Error querying upstream %s for %s %s: %s", self.forwarder, q.name, dns.rdatatype.to_text(q.rdtype), e)
+                    logging.error("Error querying upstream %s:%d for %s %s: %s", self.forwarder, self.forwarder_port, q.name, dns.rdatatype.to_text(q.rdtype), e)
                     resp.set_rcode(dns.rcode.SERVFAIL)
             else:
                 logging.info("NXDOMAIN for %s %s", q.name, dns.rdatatype.to_text(q.rdtype))
