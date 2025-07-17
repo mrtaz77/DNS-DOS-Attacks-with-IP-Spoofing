@@ -20,7 +20,7 @@ def main():
     parser.add_argument("--keyfile", help="Private key PEM file for DNSSEC signing (optional)")
     parser.add_argument("--tsig-name", help="TSIG key name (optional)")
     parser.add_argument("--tsig-secret", help="TSIG base64 secret (optional)")
-    parser.add_argument("--forwarder", help="Upstream DNS forwarder IP (optional)")
+    parser.add_argument("--forwarder", help="Upstream DNS forwarder IP or IP:port (default port 53)")
     parser.add_argument("--allow", nargs="*", default=[], help="ACL allow networks (CIDR)")
     parser.add_argument("--deny", nargs="*", default=[], help="ACL deny networks (CIDR)")
     parser.add_argument("--certfile", help="TLS certificate PEM for DoT/DoH (optional)")
