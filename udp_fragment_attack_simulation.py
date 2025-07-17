@@ -13,29 +13,34 @@ from statistics import mean
 import json
 import argparse
 
+LOGGING_DIR = "udp-fragment"
+
 # Setup logging
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(threadName)s - %(levelname)s - %(message)s",
-    handlers=[logging.FileHandler("udp_fragment_attack_simulation.log"), logging.StreamHandler()],
+    handlers=[
+        logging.FileHandler("udp_fragment_attack_simulation.log"),
+        logging.StreamHandler(),
+    ],
 )
 
 
 class UDPFragmentFloodSimulation:
     """
     UDP Fragmented Flood Attack Simulation
-    
+
     This simulation demonstrates the impact of UDP fragmentation attacks on DNS servers.
     The attack sends large UDP packets that are fragmented at the IP layer, forcing
     the target to consume resources reassembling fragments.
-    
+
     4-Thread Architecture:
     1. DNS Server Thread: Target victim server
     2. Normal Client Thread: Legitimate DNS requests
     3. UDP Fragment Attack Thread: The attacker
     4. DoS Monitoring Thread: Impact measurement
     """
-    
+
     def __init__(
         self,
         attack_duration=60,
@@ -63,7 +68,7 @@ class UDPFragmentFloodSimulation:
             "fragment_attack_stats": {},
         }
 
-        os.makedirs("logs", exist_ok=True)
+        os.makedirs(f"{LOGGING_DIR}", exist_ok=True)
 
     def dns_server_thread(self):
         """Thread 1: Run DNS server with logging"""
@@ -93,10 +98,16 @@ class UDPFragmentFloodSimulation:
             )
 
             # Log DNS server output with fragment-specific monitoring
-            with open("logs/dns_server_fragment_attack.log", "w") as log_file:
-                log_file.write(f"DNS Server (UDP Fragment Attack Target) started at {datetime.now()}\n")
-                log_file.write("Expected Impact: Memory exhaustion from fragment reassembly\n")
-                log_file.write("Monitoring: Fragment timeouts, reassembly failures, resource usage\n")
+            with open(f"{LOGGING_DIR}/dns_server_fragment_attack.log", "w") as log_file:
+                log_file.write(
+                    f"DNS Server (UDP Fragment Attack Target) started at {datetime.now()}\n"
+                )
+                log_file.write(
+                    "Expected Impact: Memory exhaustion from fragment reassembly\n"
+                )
+                log_file.write(
+                    "Monitoring: Fragment timeouts, reassembly failures, resource usage\n"
+                )
                 log_file.write("=" * 70 + "\n")
 
                 while (
@@ -110,11 +121,21 @@ class UDPFragmentFloodSimulation:
                             log_entry = f"[{timestamp}] {output.strip()}\n"
                             log_file.write(log_entry)
                             log_file.flush()
-                            
+
                             # Monitor for fragment-related issues
-                            if any(keyword in output.lower() for keyword in 
-                                  ['fragment', 'reassembl', 'timeout', 'memory', 'buffer']):
-                                logging.warning(f"[{thread_name}] FRAGMENT IMPACT: {output.strip()}")
+                            if any(
+                                keyword in output.lower()
+                                for keyword in [
+                                    "fragment",
+                                    "reassembl",
+                                    "timeout",
+                                    "memory",
+                                    "buffer",
+                                ]
+                            ):
+                                logging.warning(
+                                    f"[{thread_name}] FRAGMENT IMPACT: {output.strip()}"
+                                )
                             else:
                                 logging.debug(f"[{thread_name}] {output.strip()}")
                     except Exception as e:
@@ -142,10 +163,16 @@ class UDPFragmentFloodSimulation:
         failed_requests = 0
         response_times = []
 
-        with open("logs/client_requests_during_fragment_attack.log", "w") as log_file:
+        with open(
+            f"{LOGGING_DIR}/client_requests_during_fragment_attack.log", "w"
+        ) as log_file:
             log_file.write(f"Normal DNS Client started at {datetime.now()}\n")
-            log_file.write("Role: Legitimate user experiencing UDP fragment attack impact\n")
-            log_file.write("Expected: Slow responses due to server resource exhaustion\n")
+            log_file.write(
+                "Role: Legitimate user experiencing UDP fragment attack impact\n"
+            )
+            log_file.write(
+                "Expected: Slow responses due to server resource exhaustion\n"
+            )
             log_file.write("=" * 70 + "\n")
 
             while not self.stop_event.is_set():
@@ -185,20 +212,22 @@ class UDPFragmentFloodSimulation:
                             "query": query_name,
                             "response_time_ms": response_time,
                             "status": status,
-                            "degraded": response_time > 500
+                            "degraded": response_time > 500,
                         }
                     )
 
                     if response_time > 500:
-                        logging.warning(f"[{thread_name}] SLOW RESPONSE: {query_name} -> {response_time:.2f}ms")
+                        logging.warning(
+                            f"[{thread_name}] SLOW RESPONSE: {query_name} -> {response_time:.2f}ms"
+                        )
                     else:
-                        logging.debug(f"[{thread_name}] Query {request_count}: {response_time:.2f}ms")
+                        logging.debug(
+                            f"[{thread_name}] Query {request_count}: {response_time:.2f}ms"
+                        )
 
                 except Exception as e:
                     failed_requests += 1
-                    log_entry = (
-                        f"[{datetime.now()}] Query {request_count}: {query_name} FAILED - {str(e)}\n"
-                    )
+                    log_entry = f"[{datetime.now()}] Query {request_count}: {query_name} FAILED - {str(e)}\n"
                     log_file.write(log_entry)
                     log_file.flush()
 
@@ -210,7 +239,7 @@ class UDPFragmentFloodSimulation:
                             "response_time_ms": 0,
                             "status": "FAILED",
                             "error": str(e),
-                            "degraded": True
+                            "degraded": True,
                         }
                     )
 
@@ -225,7 +254,9 @@ class UDPFragmentFloodSimulation:
             (successful_requests / total_requests * 100) if total_requests > 0 else 0
         )
         avg_response_time = mean(response_times) if response_times else 0
-        degraded_requests = len([r for r in self.metrics["client_requests"] if r.get("degraded", False)])
+        degraded_requests = len(
+            [r for r in self.metrics["client_requests"] if r.get("degraded", False)]
+        )
 
         stats = {
             "total_requests": total_requests,
@@ -234,7 +265,9 @@ class UDPFragmentFloodSimulation:
             "success_rate": success_rate,
             "avg_response_time_ms": avg_response_time,
             "degraded_requests": degraded_requests,
-            "degradation_rate": (degraded_requests / total_requests * 100) if total_requests > 0 else 0
+            "degradation_rate": (
+                (degraded_requests / total_requests * 100) if total_requests > 0 else 0
+            ),
         }
 
         self.results_queue.put(("client_stats", stats))
@@ -265,14 +298,18 @@ class UDPFragmentFloodSimulation:
             )
 
             # Log attack start
-            with open("logs/udp_fragment_attack.log", "w") as log_file:
-                log_file.write(f"UDP Fragmented Flood Attack started at {datetime.now()}\n")
+            with open(f"{LOGGING_DIR}/udp_fragment_attack.log", "w") as log_file:
+                log_file.write(
+                    f"UDP Fragmented Flood Attack started at {datetime.now()}\n"
+                )
                 log_file.write("=" * 70 + "\n")
                 log_file.write("Attack Type: UDP Fragmented Flood\n")
                 log_file.write(f"Target: {self.server_ip}:{self.server_port}\n")
                 log_file.write(f"Duration: {self.attack_duration} seconds\n")
                 log_file.write(f"Threads: {self.attack_threads}\n")
-                log_file.write(f"Packet Size Range: {self.min_packet_size}-{self.max_packet_size} bytes\n")
+                log_file.write(
+                    f"Packet Size Range: {self.min_packet_size}-{self.max_packet_size} bytes\n"
+                )
                 log_file.write("Attack Mechanism:\n")
                 log_file.write("  1. Generate large UDP packets (>MTU)\n")
                 log_file.write("  2. IP layer fragments packets automatically\n")
@@ -287,11 +324,15 @@ class UDPFragmentFloodSimulation:
             attack_end = time.time()
 
             # Log attack completion
-            with open("logs/udp_fragment_attack.log", "a") as log_file:
+            with open(f"{LOGGING_DIR}/udp_fragment_attack.log", "a") as log_file:
                 log_file.write(f"\nUDP Fragment attack completed at {datetime.now()}\n")
-                log_file.write(f"Actual duration: {attack_end - attack_start:.2f} seconds\n")
+                log_file.write(
+                    f"Actual duration: {attack_end - attack_start:.2f} seconds\n"
+                )
                 log_file.write(f"Fragment packets sent: {attack.packets_sent}\n")
-                log_file.write(f"Estimated fragments generated: {attack.packets_sent * 3}\n")  # Approx 3 fragments per packet
+                log_file.write(
+                    f"Estimated fragments generated: {attack.packets_sent * 3}\n"
+                )  # Approx 3 fragments per packet
                 log_file.write("Target memory pressure: SEVERE\n")
                 log_file.write("Fragment reassembly impact: HIGH\n")
 
@@ -306,7 +347,8 @@ class UDPFragmentFloodSimulation:
                 "min_packet_size": self.min_packet_size,
                 "max_packet_size": self.max_packet_size,
                 "estimated_fragments": attack.packets_sent * 3,
-                "fragment_overhead_bytes": attack.packets_sent * 60  # IP header overhead per fragment
+                "fragment_overhead_bytes": attack.packets_sent
+                * 60,  # IP header overhead per fragment
             }
 
             self.metrics["fragment_attack_stats"] = fragment_attack_stats
@@ -334,7 +376,7 @@ class UDPFragmentFloodSimulation:
         phase = "baseline"
         attack_detected_time = None
 
-        with open("logs/fragment_dos_monitoring.log", "w") as log_file:
+        with open(f"{LOGGING_DIR}/fragment_dos_monitoring.log", "w") as log_file:
             log_file.write(f"UDP Fragment DoS Monitoring started at {datetime.now()}\n")
             log_file.write("Monitoring: Fragment reassembly impact on DNS service\n")
             log_file.write("Indicators: Response delays, timeouts, memory pressure\n")
@@ -346,25 +388,31 @@ class UDPFragmentFloodSimulation:
                     current_time = time.time()
 
                     # Update monitoring phase based on fragment attack indicators
-                    phase, attack_detected_time = self._update_fragment_monitoring_phase(
-                        phase,
-                        current_time,
-                        attack_detected_time,
-                        response_time,
-                        status,
-                        thread_name,
+                    phase, attack_detected_time = (
+                        self._update_fragment_monitoring_phase(
+                            phase,
+                            current_time,
+                            attack_detected_time,
+                            response_time,
+                            status,
+                            thread_name,
+                        )
                     )
 
                     # Log monitoring data
                     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-                    log_entry = (f"[{timestamp}] Phase: {phase:12} | "
-                               f"Response: {response_time:7.2f}ms | "
-                               f"Status: {status}\n")
+                    log_entry = (
+                        f"[{timestamp}] Phase: {phase:12} | "
+                        f"Response: {response_time:7.2f}ms | "
+                        f"Status: {status}\n"
+                    )
                     log_file.write(log_entry)
                     log_file.flush()
 
                     # Store metric data
-                    self._store_fragment_metric_data(phase, current_time, response_time, status)
+                    self._store_fragment_metric_data(
+                        phase, current_time, response_time, status
+                    )
 
                     # Check for fragment-specific DoS conditions
                     self._check_fragment_dos_conditions(phase, thread_name)
@@ -405,17 +453,20 @@ class UDPFragmentFloodSimulation:
     ):
         """Update monitoring phase based on fragment attack indicators"""
         # Detect fragment attack based on response time degradation
-        if (phase == "baseline" and 
-            (response_time > 200 or "FAILED" in status or "timeout" in status.lower())):
-            
+        if phase == "baseline" and (
+            response_time > 200 or "FAILED" in status or "timeout" in status.lower()
+        ):
+
             if attack_detected_time is None:
                 attack_detected_time = current_time
                 phase = "during_attack"
                 logging.warning(f"[{thread_name}] 🚨 UDP FRAGMENT DoS ATTACK DETECTED!")
-        
-        elif (phase == "during_attack" and 
-              attack_detected_time and 
-              (current_time - attack_detected_time) > (self.attack_duration + 10)):
+
+        elif (
+            phase == "during_attack"
+            and attack_detected_time
+            and (current_time - attack_detected_time) > (self.attack_duration + 10)
+        ):
             phase = "post_attack"
             logging.info(f"[{thread_name}] Post-fragment-attack recovery monitoring")
 
@@ -428,7 +479,8 @@ class UDPFragmentFloodSimulation:
             "phase": phase,
             "response_time_ms": response_time,
             "status": status,
-            "fragment_attack_indicator": response_time > 200 or "timeout" in status.lower()
+            "fragment_attack_indicator": response_time > 200
+            or "timeout" in status.lower(),
         }
 
         self.metrics[phase].append(metric_data)
@@ -441,16 +493,18 @@ class UDPFragmentFloodSimulation:
         recent_metrics = self.metrics[phase][-3:]
         recent_times = [m["response_time_ms"] for m in recent_metrics]
         recent_failures = sum(1 for m in recent_metrics if "FAILED" in m["status"])
-        recent_timeouts = sum(1 for m in recent_metrics if "timeout" in m["status"].lower())
+        recent_timeouts = sum(
+            1 for m in recent_metrics if "timeout" in m["status"].lower()
+        )
 
         avg_recent = mean(recent_times)
 
         # Fragment-specific DoS indicators
         fragment_dos_conditions = (
-            avg_recent > 300 or           # Higher threshold for fragment attacks
-            recent_failures >= 2 or       # 2+ failures in last 3 queries
-            recent_timeouts >= 1 or       # Any timeout indicates severe impact
-            max(recent_times) > 1000      # Any response > 1 second
+            avg_recent > 300  # Higher threshold for fragment attacks
+            or recent_failures >= 2  # 2+ failures in last 3 queries
+            or recent_timeouts >= 1  # Any timeout indicates severe impact
+            or max(recent_times) > 1000  # Any response > 1 second
         )
 
         if fragment_dos_conditions and phase != "during_attack":
@@ -540,7 +594,9 @@ class UDPFragmentFloodSimulation:
             return {}
 
         successful_clients = [
-            r for r in self.metrics["client_requests"] if r["status"] in ["SUCCESS", "SUCCESS_SLOW", "SUCCESS_VERY_SLOW"]
+            r
+            for r in self.metrics["client_requests"]
+            if r["status"] in ["SUCCESS", "SUCCESS_SLOW", "SUCCESS_VERY_SLOW"]
         ]
         failed_clients = [
             r for r in self.metrics["client_requests"] if r["status"] == "FAILED"
@@ -576,7 +632,7 @@ class UDPFragmentFloodSimulation:
             "max_response_degradation": 0,
             "service_disruption_detected": False,
             "memory_pressure_indicators": False,
-            "fragment_reassembly_impact": "UNKNOWN"
+            "fragment_reassembly_impact": "UNKNOWN",
         }
 
         if self.metrics["baseline"] and self.metrics["during_attack"]:
@@ -589,14 +645,18 @@ class UDPFragmentFloodSimulation:
 
             degradation = ((attack_max - baseline_avg) / baseline_avg) * 100
             dos_data["max_response_degradation"] = round(degradation, 2)
-            dos_data["service_disruption_detected"] = degradation > 300  # 300% degradation threshold
-            dos_data["memory_pressure_indicators"] = degradation > 500   # Severe degradation indicates memory pressure
+            dos_data["service_disruption_detected"] = (
+                degradation > 300
+            )  # 300% degradation threshold
+            dos_data["memory_pressure_indicators"] = (
+                degradation > 500
+            )  # Severe degradation indicates memory pressure
 
         # Analyze fragment reassembly impact
         if "fragment_attack_stats" in self.metrics:
             stats = self.metrics["fragment_attack_stats"]
             fragments_generated = stats.get("estimated_fragments", 0)
-            
+
             if fragments_generated > 10000:
                 dos_data["fragment_reassembly_impact"] = "SEVERE"
             elif fragments_generated > 5000:
@@ -623,11 +683,17 @@ class UDPFragmentFloodSimulation:
             stats = self.metrics["fragment_attack_stats"]
             print("\n🔥 FRAGMENT ATTACK STATISTICS:")
             print(f"   Fragmented Packets Sent: {stats.get('packets_sent', 0)}")
-            print(f"   Estimated Fragments Generated: {stats.get('estimated_fragments', 0)}")
-            print(f"   Packet Size Range: {stats.get('min_packet_size', 0)}-{stats.get('max_packet_size', 0)} bytes")
+            print(
+                f"   Estimated Fragments Generated: {stats.get('estimated_fragments', 0)}"
+            )
+            print(
+                f"   Packet Size Range: {stats.get('min_packet_size', 0)}-{stats.get('max_packet_size', 0)} bytes"
+            )
             print(f"   Attack Duration: {stats.get('duration', 0):.2f} seconds")
             print(f"   Attack Threads: {stats.get('threads', 0)}")
-            print(f"   Fragment Overhead: {stats.get('fragment_overhead_bytes', 0)} bytes")
+            print(
+                f"   Fragment Overhead: {stats.get('fragment_overhead_bytes', 0)} bytes"
+            )
 
         if report["baseline_performance"]:
             baseline = report["baseline_performance"]
@@ -644,7 +710,9 @@ class UDPFragmentFloodSimulation:
             print(f"   Failure Rate: {impact['failure_rate_percent']}%")
             print(f"   Timeout Rate: {impact['timeout_rate_percent']}%")
             if "performance_degradation_percent" in impact:
-                print(f"   Performance Degradation: {impact['performance_degradation_percent']}%")
+                print(
+                    f"   Performance Degradation: {impact['performance_degradation_percent']}%"
+                )
 
         if report["client_impact"]:
             client = report["client_impact"]
@@ -656,9 +724,15 @@ class UDPFragmentFloodSimulation:
 
         print("\n🔍 FRAGMENT DoS DETECTION:")
         dos = report["fragment_dos_indicators"]
-        print(f"   Fragment Attack Detected: {'✅ YES' if dos['fragment_attack_detected'] else '❌ NO'}")
-        print(f"   Service Disruption: {'✅ YES' if dos['service_disruption_detected'] else '❌ NO'}")
-        print(f"   Memory Pressure: {'✅ YES' if dos['memory_pressure_indicators'] else '❌ NO'}")
+        print(
+            f"   Fragment Attack Detected: {'✅ YES' if dos['fragment_attack_detected'] else '❌ NO'}"
+        )
+        print(
+            f"   Service Disruption: {'✅ YES' if dos['service_disruption_detected'] else '❌ NO'}"
+        )
+        print(
+            f"   Memory Pressure: {'✅ YES' if dos['memory_pressure_indicators'] else '❌ NO'}"
+        )
         print(f"   Max Degradation: {dos['max_response_degradation']}%")
         print(f"   Fragment Reassembly Impact: {dos['fragment_reassembly_impact']}")
 
@@ -671,7 +745,9 @@ class UDPFragmentFloodSimulation:
 
     def generate_comprehensive_report(self):
         """Generate comprehensive fragment attack simulation report"""
-        logging.info("Generating comprehensive UDP fragment attack simulation report...")
+        logging.info(
+            "Generating comprehensive UDP fragment attack simulation report..."
+        )
 
         report = {
             "simulation_summary": {
@@ -685,8 +761,8 @@ class UDPFragmentFloodSimulation:
                     "min_packet_size": self.min_packet_size,
                     "max_packet_size": self.max_packet_size,
                     "attack_threads": self.attack_threads,
-                    "attack_duration": self.attack_duration
-                }
+                    "attack_duration": self.attack_duration,
+                },
             },
             "baseline_performance": self._analyze_baseline_performance(),
             "fragment_attack_impact": self._analyze_fragment_attack_impact(),
@@ -696,7 +772,7 @@ class UDPFragmentFloodSimulation:
         }
 
         # Save detailed report
-        with open("logs/udp_fragment_simulation_report.json", "w") as f:
+        with open(f"{LOGGING_DIR}/udp_fragment_simulation_report.json", "w") as f:
             json.dump(report, f, indent=2)
 
         # Print summary
@@ -736,7 +812,9 @@ class UDPFragmentFloodSimulation:
         print("Thread 4: Fragment DoS Monitor - Measures attack impact")
         print("=" * 90)
         print("Attack Type: UDP Fragmented Flood")
-        print(f"Attack Parameters: Duration={self.attack_duration}s, Threads={self.attack_threads}")
+        print(
+            f"Attack Parameters: Duration={self.attack_duration}s, Threads={self.attack_threads}"
+        )
         print(f"Packet Size Range: {self.min_packet_size}-{self.max_packet_size} bytes")
         print(f"Target Server: {self.server_ip}:{self.server_port}")
         print("=" * 90)
@@ -755,7 +833,8 @@ class UDPFragmentFloodSimulation:
                     name="Thread-3-UDP-Fragment-Attack",
                 ),
                 threading.Thread(
-                    target=self.fragment_dos_monitor_thread, name="Thread-4-Fragment-DoS-Monitor"
+                    target=self.fragment_dos_monitor_thread,
+                    name="Thread-4-Fragment-DoS-Monitor",
                 ),
             ]
 
@@ -765,7 +844,9 @@ class UDPFragmentFloodSimulation:
                 logging.info(f"Started {thread.name}")
                 time.sleep(1)  # Stagger thread starts
 
-            logging.info("All threads started successfully - UDP fragment simulation running")
+            logging.info(
+                "All threads started successfully - UDP fragment simulation running"
+            )
 
             # Wait for attack thread to complete (determines simulation end)
             threads[2].join()  # Wait for UDP fragment attack thread
@@ -908,7 +989,11 @@ Examples:
 
     # Confirm before starting
     try:
-        confirm = input("Start the UDP fragment attack simulation? (yes/no): ").lower().strip()
+        confirm = (
+            input("Start the UDP fragment attack simulation? (yes/no): ")
+            .lower()
+            .strip()
+        )
         if confirm != "yes":
             print("UDP fragment attack simulation cancelled.")
             sys.exit(0)
