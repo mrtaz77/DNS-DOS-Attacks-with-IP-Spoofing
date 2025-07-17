@@ -15,6 +15,8 @@ import argparse
 import random
 import string
 
+LOGGING_DIR = 'dns-random-subdomain'
+
 # Setup logging
 logging.basicConfig(
     level=logging.INFO,
@@ -33,13 +35,12 @@ class DNSSubdomainFloodSimulation:
     Network Topology:
     1. ATTACKER: Generates random subdomain queries with IP spoofing
     2. TARGET DNS SERVER: Primary victim (resolver/recursive server)
-    3. AUTHORITATIVE DNS SERVERS: Unwitting amplification participants
-    4. LEGITIMATE DNS CLIENTS: Collateral victims experiencing service degradation
+    3. LEGITIMATE DNS CLIENTS: Collateral victims experiencing service degradation
 
     Attack Flow:
     - Attacker floods target with random subdomain queries (abc123.example.com)
-    - Target server performs recursive lookups to authoritative servers
-    - Authoritative servers respond with NXDOMAIN for non-existent subdomains
+    - Target server performs recursive lookups to external DNS (8.8.8.8)
+    - External servers respond with NXDOMAIN for non-existent subdomains
     - Processing overhead overwhelms target server
     - Legitimate clients experience slow/failed DNS resolution
     """
@@ -49,18 +50,15 @@ class DNSSubdomainFloodSimulation:
         attack_duration=60,
         attack_threads=15,
         target_server_port=5353,
-        auth_server_port=6353,
         server_ip="127.0.0.1",
     ):
         self.target_dns_process = None
-        self.auth_dns_process = None
         self.stop_event = threading.Event()
         self.results_queue = queue.Queue()
 
         # Network configuration
         self.server_ip = server_ip
         self.target_server_port = target_server_port  # Target DNS resolver
-        self.auth_server_port = auth_server_port  # Authoritative DNS server
 
         # Attack configuration
         self.attack_duration = attack_duration
@@ -72,21 +70,22 @@ class DNSSubdomainFloodSimulation:
             "during_attack": [],
             "post_attack": [],
             "client_requests": [],
-            "auth_server_load": [],
             "attack_stats": {},
         }
 
         # DNS domains for testing
         self.legitimate_domains = [
             "www.example.com",
-            "mail.example.com",
-            "ftp.example.com",
-            "api.example.com",
+            "ns1.example.com",
+            "www.facebook.com",
+            "www.github.com",
+            "www.youtube.com",
+            "www.leetcode.com"
         ]
 
         self.base_domains = ["example.com", "test.com", "demo.com"]
 
-        os.makedirs("logs", exist_ok=True)
+        os.makedirs(f"{LOGGING_DIR}", exist_ok=True)
 
     def target_dns_server_thread(self):
         """Thread 1: Target DNS Server (Recursive Resolver) - Primary Victim"""
@@ -96,7 +95,7 @@ class DNSSubdomainFloodSimulation:
         )
 
         try:
-            # Start target DNS server with forwarding to authoritative server
+            # Start target DNS server with forwarding to Google DNS
             # This simulates a corporate/ISP DNS resolver
             self.target_dns_process = subprocess.Popen(
                 [
@@ -112,7 +111,7 @@ class DNSSubdomainFloodSimulation:
                     "--port-tcp",
                     str(self.target_server_port + 1),
                     "--forwarder",
-                    f"{self.server_ip}:{self.auth_server_port}",  # Forward to auth server
+                    "8.8.8.8",  # Forward to Google DNS
                     "--rate-limit-threshold",
                     "100",  # Some protection
                     "--rate-limit-window",
@@ -125,11 +124,12 @@ class DNSSubdomainFloodSimulation:
             )
 
             # Log target DNS server output
-            with open("logs/target_dns_server.log", "w") as log_file:
+            with open(f"{LOGGING_DIR}/target_dns_server.log", "w") as log_file:
                 log_file.write(
                     f"TARGET DNS Server (Victim) started at {datetime.now()}\n"
                 )
                 log_file.write("Role: Recursive resolver receiving attack traffic\n")
+                log_file.write("Forwarder: 8.8.8.8 (Google DNS)\n")
                 log_file.write("=" * 60 + "\n")
 
                 while (
@@ -170,89 +170,8 @@ class DNSSubdomainFloodSimulation:
             logging.error(f"[{thread_name}] Failed to start target DNS server: {e}")
             self.results_queue.put(("target_dns_error", str(e)))
 
-    def authoritative_dns_server_thread(self):
-        """Thread 2: Authoritative DNS Server - Unwitting Amplification Participant"""
-        thread_name = "Auth-DNS-Server"
-        logging.info(
-            f"[{thread_name}] Starting AUTHORITATIVE DNS server on port {self.auth_server_port}"
-        )
-
-        try:
-            # Start authoritative DNS server for example.com, test.com, demo.com
-            # This simulates legitimate authoritative nameservers
-            self.auth_dns_process = subprocess.Popen(
-                [
-                    sys.executable,
-                    "-m",
-                    "dns_server.main",
-                    "--zone",
-                    "dns_server/zones/primary.zone",
-                    "--addr",
-                    self.server_ip,
-                    "--port-udp",
-                    str(self.auth_server_port),
-                    "--port-tcp",
-                    str(self.auth_server_port + 1),
-                    # No forwarding - authoritative only
-                ],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                universal_newlines=True,
-                bufsize=1,
-            )
-
-            # Log authoritative DNS server output
-            with open("logs/auth_dns_server.log", "w") as log_file:
-                log_file.write(
-                    f"AUTHORITATIVE DNS Server started at {datetime.now()}\n"
-                )
-                log_file.write(
-                    "Role: Authoritative nameserver for example.com, test.com, demo.com\n"
-                )
-                log_file.write(
-                    "Expected behavior: Return NXDOMAIN for random subdomains\n"
-                )
-                log_file.write("=" * 70 + "\n")
-
-                while (
-                    not self.stop_event.is_set()
-                    and self.auth_dns_process.poll() is None
-                ):
-                    try:
-                        output = self.auth_dns_process.stdout.readline()
-                        if output:
-                            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                            log_entry = f"[{timestamp}] {output.strip()}\n"
-                            log_file.write(log_entry)
-                            log_file.flush()
-
-                            # Monitor for NXDOMAIN responses (expected during attack)
-                            if "nxdomain" in output.lower():
-                                self.metrics["auth_server_load"].append(
-                                    {
-                                        "timestamp": time.time(),
-                                        "type": "NXDOMAIN_response",
-                                        "load_indicator": True,
-                                    }
-                                )
-
-                            logging.debug(f"[{thread_name}] {output.strip()}")
-                    except Exception as e:
-                        logging.error(
-                            f"[{thread_name}] Error reading auth server output: {e}"
-                        )
-                        break
-
-            logging.info(f"[{thread_name}] Authoritative DNS server thread completed")
-
-        except Exception as e:
-            logging.error(
-                f"[{thread_name}] Failed to start authoritative DNS server: {e}"
-            )
-            self.results_queue.put(("auth_dns_error", str(e)))
-
     def legitimate_client_thread(self):
-        """Thread 3: Legitimate DNS Client - Collateral Victim"""
+        """Thread 2: Legitimate DNS Client - Collateral Victim"""
         thread_name = "Legitimate-Client"
         logging.info(f"[{thread_name}] Starting legitimate client requests")
 
@@ -264,7 +183,7 @@ class DNSSubdomainFloodSimulation:
         failed_requests = 0
         response_times = []
 
-        with open("logs/legitimate_client.log", "w") as log_file:
+        with open(f"{LOGGING_DIR}/legitimate_client.log", "w") as log_file:
             log_file.write(f"Legitimate DNS Client started at {datetime.now()}\n")
             log_file.write(
                 "Role: Normal user experiencing service degradation during attack\n"
@@ -347,7 +266,7 @@ class DNSSubdomainFloodSimulation:
                     logging.error(f"[{thread_name}] Query {request_count} FAILED: {e}")
 
                 request_count += 1
-                time.sleep(3)  # Request every 3 seconds (normal user behavior)
+                time.sleep(2)  # Request every 2 seconds (normal user behavior)
 
         # Calculate final statistics
         total_requests = successful_requests + failed_requests
@@ -375,7 +294,7 @@ class DNSSubdomainFloodSimulation:
         logging.info(f"[{thread_name}] Client impact: {stats}")
 
     def dns_subdomain_flood_attack_thread(self):
-        """Thread 4: DNS Random Subdomain Query Flood Attack - The Attacker"""
+        """Thread 3: DNS Random Subdomain Query Flood Attack - The Attacker"""
         thread_name = "DNS-Subdomain-Attack"
         logging.info(
             f"[{thread_name}] Preparing DNS Random Subdomain Query Flood attack"
@@ -400,12 +319,12 @@ class DNSSubdomainFloodSimulation:
                 target_port=self.target_server_port,  # Attack the target DNS server
                 duration=self.attack_duration,
                 threads=self.attack_threads,
-                base_domains=self.base_domains,  # Use domains served by auth server
+                base_domains=self.base_domains,  # Use various domains
                 query_types=[1, 28, 15, 5, 2, 16],  # Multiple query types
             )
 
             # Log attack start
-            with open("logs/attack.log", "w") as log_file:
+            with open(f"{LOGGING_DIR}/attack.log", "w") as log_file:
                 log_file.write(
                     f"DNS Random Subdomain Query Flood Attack started at {datetime.now()}\n"
                 )
@@ -415,7 +334,7 @@ class DNSSubdomainFloodSimulation:
                     f"Target: {self.server_ip}:{self.target_server_port} (Target DNS Server)\n"
                 )
                 log_file.write(
-                    f"Auth Server: {self.server_ip}:{self.auth_server_port} (Authoritative)\n"
+                    "External Forwarder: 8.8.8.8 (Google DNS)\n"
                 )
                 log_file.write(f"Duration: {self.attack_duration} seconds\n")
                 log_file.write(f"Threads: {self.attack_threads}\n")
@@ -424,8 +343,8 @@ class DNSSubdomainFloodSimulation:
                 log_file.write("  1. Generate random subdomains (abc123.example.com)\n")
                 log_file.write("  2. Spoof source IP addresses\n")
                 log_file.write("  3. Flood target DNS server with queries\n")
-                log_file.write("  4. Target forwards to authoritative servers\n")
-                log_file.write("  5. Auth servers respond with NXDOMAIN\n")
+                log_file.write("  4. Target forwards to 8.8.8.8\n")
+                log_file.write("  5. External servers respond with NXDOMAIN\n")
                 log_file.write("  6. Processing overhead overwhelms target\n")
                 log_file.write("=" * 70 + "\n")
 
@@ -435,7 +354,7 @@ class DNSSubdomainFloodSimulation:
             attack_end = time.time()
 
             # Log attack completion
-            with open("logs/attack.log", "a") as log_file:
+            with open(f"{LOGGING_DIR}/attack.log", "a") as log_file:
                 log_file.write(
                     f"\nDNS Subdomain Flood attack completed at {datetime.now()}\n"
                 )
@@ -448,7 +367,7 @@ class DNSSubdomainFloodSimulation:
                 )
                 log_file.write("Target server processing load: SEVERE\n")
                 log_file.write(
-                    "Authoritative server impact: HIGH (NXDOMAIN generation)\n"
+                    "External DNS server impact: HIGH (NXDOMAIN generation)\n"
                 )
 
             attack_stats = {
@@ -457,7 +376,7 @@ class DNSSubdomainFloodSimulation:
                 "end_time": attack_end,
                 "duration": attack_end - attack_start,
                 "target": f"{self.server_ip}:{self.target_server_port}",
-                "auth_server": f"{self.server_ip}:{self.auth_server_port}",
+                "external_forwarder": "8.8.8.8",
                 "threads": self.attack_threads,
                 "dns_queries_sent": attack.packets_sent,
                 "base_domains": self.base_domains,
@@ -479,7 +398,7 @@ class DNSSubdomainFloodSimulation:
             self.results_queue.put(("attack_error", str(e)))
 
     def dos_monitoring_thread(self):
-        """Thread 5: DoS Impact Monitoring - Attack Effect Analysis"""
+        """Thread 4: DoS Impact Monitoring - Attack Effect Analysis"""
         thread_name = "DoS-Monitor"
         logging.info(f"[{thread_name}] Starting DNS DoS impact monitoring")
 
@@ -490,7 +409,7 @@ class DNSSubdomainFloodSimulation:
         attack_detected_time = None
         query_count = 0
 
-        with open("logs/dos_monitoring.log", "w") as log_file:
+        with open(f"{LOGGING_DIR}/dos_monitoring.log", "w") as log_file:
             log_file.write(f"DNS DoS Impact Monitoring started at {datetime.now()}\n")
             log_file.write("Monitoring: Service degradation and attack indicators\n")
             log_file.write("Focus: Response times, failure rates, NXDOMAIN patterns\n")
@@ -724,27 +643,6 @@ class DNSSubdomainFloodSimulation:
 
         return attack_data
 
-    def _analyze_auth_server_impact(self):
-        """Analyze authoritative server impact"""
-        if not self.metrics["auth_server_load"]:
-            return {"nxdomain_responses": 0, "load_detected": False}
-
-        nxdomain_count = len(
-            [
-                m
-                for m in self.metrics["auth_server_load"]
-                if m["type"] == "NXDOMAIN_response"
-            ]
-        )
-
-        return {
-            "nxdomain_responses": nxdomain_count,
-            "load_detected": nxdomain_count > 0,
-            "estimated_processing_overhead": (
-                "HIGH" if nxdomain_count > 100 else "MODERATE"
-            ),
-        }
-
     def _analyze_client_impact(self):
         """Analyze legitimate client impact metrics"""
         if not self.metrics["client_requests"]:
@@ -811,9 +709,9 @@ class DNSSubdomainFloodSimulation:
             and "dns_queries_sent" in self.metrics["attack_stats"]
         ):
             queries_sent = self.metrics["attack_stats"]["dns_queries_sent"]
-            # Each query forces authoritative server lookup + NXDOMAIN response processing
+            # Each query forces external DNS lookup + NXDOMAIN response processing
             dos_data["amplification_factor"] = 2.0  # Conservative estimate
-            dos_data["estimated_auth_server_load"] = queries_sent * 2
+            dos_data["estimated_external_server_load"] = queries_sent * 2
 
         return dos_data
 
@@ -827,7 +725,7 @@ class DNSSubdomainFloodSimulation:
         print("   - IP spoofing for distributed appearance")
         print("   - Forces cache misses and recursive lookups")
         print("   - Overwhelms DNS resolver processing capacity")
-        print("   - Generates NXDOMAIN responses from authoritative servers")
+        print("   - Generates NXDOMAIN responses from external DNS (8.8.8.8)")
 
         if "attack_stats" in self.metrics:
             stats = self.metrics["attack_stats"]
@@ -836,7 +734,7 @@ class DNSSubdomainFloodSimulation:
             print(f"   Attack Duration: {stats.get('duration', 0):.2f} seconds")
             print(f"   Attack Threads: {stats.get('threads', 0)}")
             print(f"   Target Server: {stats.get('target', 'Unknown')}")
-            print(f"   Auth Server: {stats.get('auth_server', 'Unknown')}")
+            print(f"   External Forwarder: {stats.get('external_forwarder', 'Unknown')}")
 
         if report["baseline_performance"]:
             baseline = report["baseline_performance"]
@@ -865,13 +763,6 @@ class DNSSubdomainFloodSimulation:
             print(f"   Failed Requests: {client['failed_requests']}")
             print(f"   Average Response Time: {client['avg_response_time_ms']}ms")
 
-        if report.get("auth_server_impact"):
-            auth = report["auth_server_impact"]
-            print("\n🏛️ AUTHORITATIVE SERVER IMPACT:")
-            print(f"   NXDOMAIN Responses: {auth['nxdomain_responses']}")
-            print(f"   Processing Overhead: {auth['estimated_processing_overhead']}")
-            print(f"   Load Detected: {'✅ YES' if auth['load_detected'] else '❌ NO'}")
-
         print("\n🔍 DNS DoS DETECTION:")
         dos = report["dns_dos_indicators"]
         print(f"   Attack Detected: {'✅ YES' if dos['attack_detected'] else '❌ NO'}")
@@ -884,7 +775,6 @@ class DNSSubdomainFloodSimulation:
 
         print("\n📁 Detailed logs saved in: logs/ directory")
         print("   - target_dns_server.log: Target DNS server activity")
-        print("   - auth_dns_server.log: Authoritative server responses")
         print("   - legitimate_client.log: Client experience during attack")
         print("   - attack.log: Attack execution details")
         print("   - dos_monitoring.log: Service degradation metrics")
@@ -899,25 +789,24 @@ class DNSSubdomainFloodSimulation:
                 "timestamp": datetime.now().isoformat(),
                 "attack_type": "dns-random-subdomain-flood",
                 "target_server": f"{self.server_ip}:{self.target_server_port}",
-                "auth_server": f"{self.server_ip}:{self.auth_server_port}",
+                "external_forwarder": "8.8.8.8",
                 "total_duration": self.attack_duration
                 + 30,  # Including baseline and recovery
                 "network_topology": {
                     "attacker": "DNS Random Subdomain Query Flood",
                     "target": "Recursive DNS Resolver",
-                    "authoritative": "Legitimate nameservers",
+                    "external": "Google DNS (8.8.8.8)",
                     "clients": "Normal DNS users",
                 },
             },
             "baseline_performance": self._analyze_baseline_performance(),
             "attack_impact": self._analyze_attack_impact(),
-            "auth_server_impact": self._analyze_auth_server_impact(),
             "client_impact": self._analyze_client_impact(),
             "dns_dos_indicators": self._analyze_dns_dos_indicators(),
         }
 
         # Save detailed report
-        with open("logs/dns_simulation_report.json", "w") as f:
+        with open(f"{LOGGING_DIR}/dns_simulation_report.json", "w") as f:
             json.dump(report, f, indent=2)
 
         # Print summary
@@ -945,59 +834,41 @@ class DNSSubdomainFloodSimulation:
                 except Exception:
                     pass
 
-        # Terminate authoritative DNS server
-        if self.auth_dns_process:
-            try:
-                self.auth_dns_process.terminate()
-                self.auth_dns_process.wait(timeout=5)
-                logging.info("Authoritative DNS server terminated successfully")
-            except Exception as e:
-                logging.error(f"Error terminating authoritative DNS server: {e}")
-                try:
-                    self.auth_dns_process.kill()
-                except Exception:
-                    pass
-
         logging.info("DNS simulation cleanup completed")
 
     def run_simulation(self):
-        """Run the complete 5-thread DNS subdomain flood attack simulation"""
-        print("🚀 Starting 5-Thread DNS Random Subdomain Query Flood Simulation")
+        """Run the complete 4-thread DNS subdomain flood attack simulation"""
+        print("🚀 Starting 4-Thread DNS Random Subdomain Query Flood Simulation")
         print("=" * 90)
         print("Network Topology:")
         print("Thread 1: Target DNS Server (Recursive Resolver) - PRIMARY VICTIM")
-        print("Thread 2: Authoritative DNS Server - Unwitting participant")
-        print("Thread 3: Legitimate DNS Client - Collateral victim")
-        print("Thread 4: DNS Subdomain Flood Attack - THE ATTACKER")
-        print("Thread 5: DoS Impact Monitoring - Attack detection")
+        print("Thread 2: Legitimate DNS Client - Collateral victim")
+        print("Thread 3: DNS Subdomain Flood Attack - THE ATTACKER")
+        print("Thread 4: DoS Impact Monitoring - Attack detection")
         print("=" * 90)
         print("Attack Type: DNS Random Subdomain Query Flood")
         print(f"Attack Duration: {self.attack_duration}s")
         print(f"Attack Threads: {self.attack_threads}")
         print(f"Target DNS Server: {self.server_ip}:{self.target_server_port}")
-        print(f"Auth DNS Server: {self.server_ip}:{self.auth_server_port}")
+        print("External Forwarder: 8.8.8.8 (Google DNS)")
         print(f"Base Domains: {', '.join(self.base_domains)}")
         print("=" * 90)
 
         try:
-            # Create and start all 5 threads
+            # Create and start all 4 threads
             threads = [
                 threading.Thread(
                     target=self.target_dns_server_thread, name="Thread-1-Target-DNS"
                 ),
                 threading.Thread(
-                    target=self.authoritative_dns_server_thread,
-                    name="Thread-2-Auth-DNS",
-                ),
-                threading.Thread(
-                    target=self.legitimate_client_thread, name="Thread-3-Legit-Client"
+                    target=self.legitimate_client_thread, name="Thread-2-Legit-Client"
                 ),
                 threading.Thread(
                     target=self.dns_subdomain_flood_attack_thread,
-                    name="Thread-4-DNS-Attack",
+                    name="Thread-3-DNS-Attack",
                 ),
                 threading.Thread(
-                    target=self.dos_monitoring_thread, name="Thread-5-DoS-Monitor"
+                    target=self.dos_monitoring_thread, name="Thread-4-DoS-Monitor"
                 ),
             ]
 
@@ -1010,7 +881,7 @@ class DNSSubdomainFloodSimulation:
             logging.info("All threads started successfully - DNS simulation running")
 
             # Wait for attack thread to complete (determines simulation end)
-            threads[3].join()  # Wait for DNS attack thread
+            threads[2].join()  # Wait for DNS attack thread
             logging.info("DNS subdomain flood attack thread completed")
 
             # Allow time for post-attack monitoring and recovery assessment
@@ -1020,7 +891,7 @@ class DNSSubdomainFloodSimulation:
             self.stop_event.set()
 
             for i, thread in enumerate(threads):
-                if i != 3:  # Skip attack thread (already completed)
+                if i != 2:  # Skip attack thread (already completed)
                     thread.join(timeout=15)
                     if thread.is_alive():
                         logging.warning(f"{thread.name} did not stop gracefully")
@@ -1049,7 +920,7 @@ DNS Random Subdomain Query Flood Attack Simulation
 
 Network Topology:
   Target DNS Server    : Recursive resolver receiving attack traffic (port 5353)
-  Authoritative Server : Legitimate nameserver for domains (port 6353)
+  External Forwarder   : Google DNS (8.8.8.8) for upstream queries
   Legitimate Client    : Normal user experiencing service degradation
   Attacker            : Generates random subdomain queries with IP spoofing
   
@@ -1057,14 +928,14 @@ Attack Mechanism:
   1. Attacker generates random subdomains (abc123.example.com)
   2. Spoofs source IP addresses to appear distributed
   3. Floods target DNS server with queries
-  4. Target forwards to authoritative servers
-  5. Auth servers respond with NXDOMAIN for non-existent subdomains
+  4. Target forwards to external DNS (8.8.8.8)
+  5. External servers respond with NXDOMAIN for non-existent subdomains
   6. Processing overhead overwhelms target server
   7. Legitimate clients experience slow/failed DNS resolution
 
 Examples:
   sudo python dns_random_subdomain_attack_simulation.py --duration 30 --threads 10
-  sudo python dns_random_subdomain_attack_simulation.py --target-port 5353 --auth-port 6353
+  sudo python dns_random_subdomain_attack_simulation.py --target-port 5353
         """,
     )
 
@@ -1089,13 +960,6 @@ Examples:
         type=int,
         default=5353,
         help="Target DNS server port (default: 5353)",
-    )
-
-    parser.add_argument(
-        "--auth-port",
-        type=int,
-        default=6353,
-        help="Authoritative DNS server port (default: 6353)",
     )
 
     parser.add_argument(
@@ -1124,14 +988,6 @@ Examples:
         print("Error: Target port must be between 1 and 65535")
         sys.exit(1)
 
-    if args.auth_port <= 0 or args.auth_port > 65535:
-        print("Error: Auth port must be between 1 and 65535")
-        sys.exit(1)
-
-    if args.target_port == args.auth_port:
-        print("Error: Target port and auth port must be different")
-        sys.exit(1)
-
     # Set logging level
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
@@ -1140,7 +996,7 @@ Examples:
     print(f"Attack Duration: {args.duration} seconds")
     print(f"Attack Threads: {args.threads}")
     print(f"Target DNS Server: {args.server_ip}:{args.target_port}")
-    print(f"Auth DNS Server: {args.server_ip}:{args.auth_port}")
+    print("External Forwarder: 8.8.8.8 (Google DNS)")
     print(f"Verbose Logging: {args.verbose}")
     print()
 
@@ -1158,7 +1014,6 @@ Examples:
         attack_duration=args.duration,
         attack_threads=args.threads,
         target_server_port=args.target_port,
-        auth_server_port=args.auth_port,
         server_ip=args.server_ip,
     )
 
