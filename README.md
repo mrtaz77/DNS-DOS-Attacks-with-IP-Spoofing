@@ -17,43 +17,17 @@ This project implements various types of Denial of Service (DoS) and Distributed
 
 ## Implemented Attacks
 
-### 1. TCP SYN Flood Attack
-- **File**: `attack/tcp_syn_flood.py`
-- **Description**: Floods target with TCP SYN packets using spoofed source IPs
-- **Features**: Multi-threaded, configurable sequence numbers, proper TCP header construction
-- **Documentation**: Included in source code with RFC-style packet structure comments
-
-### 2. UDP Fragmented Flood Attack
+### 1. UDP Fragmented Flood Attack
 - **File**: `attack/udp_fragmented_flood.py`
 - **Description**: Sends fragmented UDP packets with spoofed source IPs
 - **Features**: Out-of-order fragment delivery, proper fragmentation handling
 - **Documentation**: `UDP_FRAGMENTED_FLOOD_DOCUMENTATION.md`
 
-### 3. UDP Fraggle Attack
+### 2. UDP Fraggle Attack
 - **File**: `attack/udp_fraggle.py`
 - **Description**: Network amplification attack using UDP broadcast packets
 - **Features**: Broadcast targeting, service amplification, spoofed source IPs
 - **Documentation**: `UDP_FRAGGLE_DOCUMENTATION.md`
-
-### 4. Additional Attacks (In Development)
-- ICMP Ping Flood
-- ICMP Smurf Attack
-- Malformed UDP Query Flood
-
-## Architecture
-
-### Base Class Design
-All attack implementations inherit from `AttackStrategy` base class:
-
-```python
-class AttackStrategy(ABC):
-    """Abstract base class for all attack strategies."""
-    
-    @abstractmethod
-    def attack(self):
-        """Execute the attack."""
-        pass
-```
 
 ### Common Features
 - **Logging**: Centralized logging with different severity levels
@@ -61,12 +35,6 @@ class AttackStrategy(ABC):
 - **IP Spoofing**: Reusable IP spoofing utilities
 - **Checksum Calculation**: Proper packet checksum computation
 - **Privilege Checking**: Raw socket privilege validation
-
-## Requirements
-
-- Python 3.6+
-- Administrative/root privileges (for raw sockets)
-- Required packages: `colorama`, `logging`
 
 ## Installation
 
