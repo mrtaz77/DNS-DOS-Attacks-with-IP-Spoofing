@@ -1,0 +1,169 @@
+version: '3.8'
+
+services:
+  # Redis for persistent caching
+  redis:
+    image: redis:7-alpine
+    container_name: dns-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  # Primary DNS Server (Authoritative + Forwarding)
+  dns-primary:
+    build: .
+    container_name: dns-primary
+    ports:
+      - "5353:5353/udp"
+      - "5354:5354/tcp"
+    environment:
+      - DNS_ROLE=primary
+    command: >
+      --zone /app/dns_server/zones/primary.zone
+      --port-udp 5353 --port-tcp 5354
+      --forwarder 8.8.8.8
+      --cache-type hybrid --cache-size 10000
+      --redis-url redis://redis:6379/0
+      --tsig-name tsig-key-1752130646
+      --tsig-secret 2vgKc8+OH9UMBrRYTBYOmjffLACFVtGQPgXjt6fw05k=
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./dns_server/zones:/app/dns_server/zones:ro
+      - ./logs:/app/logs
+    healthcheck:
+      test: ["CMD", "dig", "@localhost", "-p", "5353", "www.example.com", "A", "+short", "+time=2"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # Secondary DNS Server 1 (Authoritative only)
+  dns-secondary1:
+    build: .
+    container_name: dns-secondary1
+    ports:
+      - "7353:7353/udp"
+      - "7354:7354/tcp"
+    environment:
+      - DNS_ROLE=secondary
+    command: >
+      --port-udp 7353 --port-tcp 7354
+      --secondary
+      --primary-server dns-primary --primary-port 5354
+      --cache-type lru --cache-size 5000
+      --tsig-name tsig-key-1752130646
+      --tsig-secret 2vgKc8+OH9UMBrRYTBYOmjffLACFVtGQPgXjt6fw05k=
+    depends_on:
+      dns-primary:
+        condition: service_healthy
+    volumes:
+      - ./logs:/app/logs
+
+  # Secondary DNS Server 2 (Hybrid: Auth + Forwarding)
+  dns-secondary2:
+    build: .
+    container_name: dns-secondary2
+    ports:
+      - "8353:8353/udp"
+      - "8354:8354/tcp"
+    environment:
+      - DNS_ROLE=secondary-hybrid
+    command: >
+      --port-udp 8353 --port-tcp 8354
+      --secondary
+      --primary-server dns-primary --primary-port 5354
+      --forwarder 1.1.1.1
+      --cache-type redis --redis-url redis://redis:6379/1
+      --tsig-name tsig-key-1752130646
+      --tsig-secret 2vgKc8+OH9UMBrRYTBYOmjffLACFVtGQPgXjt6fw05k=
+    depends_on:
+      dns-primary:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./logs:/app/logs
+
+  # Load Balancing Gateway
+  dns-gateway:
+    build: .
+    container_name: dns-gateway
+    ports:
+      - "9353:9353/udp"
+    environment:
+      - DNS_ROLE=gateway
+    command: >
+      python -m dns_server.utils.dns_gateway
+      --listen-port 9353
+      --backend-servers dns-primary:5353 dns-secondary1:7353 dns-secondary2:8353
+      --tsig-key-name tsig-key-1752130646
+      --tsig-secret 2vgKc8+OH9UMBrRYTBYOmjffLACFVtGQPgXjt6fw05k=
+    depends_on:
+      - dns-primary
+      - dns-secondary1
+      - dns-secondary2
+    volumes:
+      - ./logs:/app/logs
+
+  # DoT/DoH Server (TLS-enabled)
+  dns-secure:
+    build: .
+    container_name: dns-secure
+    ports:
+      - "853:853/tcp"    # DoT
+      - "8443:8443/tcp"  # DoH
+    environment:
+      - DNS_ROLE=secure
+    command: >
+      --zone /app/dns_server/zones/primary.zone
+      --port-dot 853 --port-doh 8443
+      --certfile /app/dns_server/certs/cert.pem
+      --certkey /app/dns_server/certs/key.pem
+      --forwarder 8.8.8.8
+      --cache-type hybrid --cache-size 15000
+      --redis-url redis://redis:6379/2
+      --tsig-name tsig-key-1752130646
+      --tsig-secret 2vgKc8+OH9UMBrRYTBYOmjffLACFVtGQPgXjt6fw05k=
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./dns_server/zones:/app/dns_server/zones:ro
+      - ./dns_server/certs:/app/dns_server/certs:ro
+      - ./logs:/app/logs
+
+  # Rate-Limited Server (DoS Protection)
+  dns-protected:
+    build: .
+    container_name: dns-protected
+    ports:
+      - "6353:6353/udp"
+      - "6354:6354/tcp"
+    environment:
+      - DNS_ROLE=protected
+    command: >
+      --zone /app/dns_server/zones/primary.zone
+      --port-udp 6353 --port-tcp 6354
+      --forwarder 8.8.8.8
+      --cache-type lru --cache-size 8000
+      --rate-limit-threshold 10 --rate-limit-window 5 --rate-limit-ban-duration 300
+      --allow 172.0.0.0/8 --allow 192.168.0.0/16
+    volumes:
+      - ./dns_server/zones:/app/dns_server/zones:ro
+      - ./logs:/app/logs
+
+volumes:
+  redis_data:
+    driver: local
+
+networks:
+  default:
+    driver: bridge

@@ -5,7 +5,7 @@ Full-featured DNS server with primary/secondary architecture, zone transfers (AX
 ## Features
 - **Multi-Server**: Primary/Secondary with auto-sync | **Gateway**: Load balancing + health checks
 - **Security**: TSIG authentication, ACLs, rate limiting | **Protocols**: UDP/TCP/DoT/DoH  
-- **Zone Management**: AXFR/IXFR transfers, dynamic updates | **Forwarding**: Upstream DNS support
+- **Zone Management**: AXFR/IXFR transfers, dynamic updates | **Forwarding**: Multiple upstream DNS servers with round-robin load balancing
 
 ## Quick Start
 
@@ -32,8 +32,14 @@ python -m dns_server.main --zone dns_server/zones/primary.zone --port-udp 5353 -
 
 ### 2. DNS Server with Upstream Forwarding (Hybrid Mode)
 ```bash
-# Answers local zones + forwards external queries to Google DNS
-python -m dns_server.main --zone dns_server/zones/primary.zone --port-udp 5353   --port-tcp 5354  --forwarder 8.8.8.8
+# Single forwarder - answers local zones + forwards external queries to Google DNS
+python -m dns_server.main --zone dns_server/zones/primary.zone --port-udp 5353 --port-tcp 5354 --forwarder 8.8.8.8
+
+# Multiple forwarders - round-robin load balancing across multiple upstream servers
+python -m dns_server.main --zone dns_server/zones/primary.zone --port-udp 5353 --port-tcp 5354 --forwarders 8.8.8.8 127.0.0.1:3353
+
+# Mix of both single and multiple forwarders
+python -m dns_server.main --zone dns_server/zones/primary.zone --port-udp 5353 --port-tcp 5354 --forwarder 8.8.8.8 --forwarders 127.0.0.1:3353 1.1.1.1
 
 # Test local zone:     dig @127.0.0.1 -p 5353 www.example.com A
 # Test forwarding:     dig @127.0.0.1 -p 5353 www.google.com A
@@ -54,7 +60,7 @@ python -m dns_server.main --zone dns_server/zones/primary.zone --port-udp 5353 -
 # Terminal 1: Primary server
 python -m dns_server.main --zone dns_server/zones/primary.zone --port-udp 5353 --port-tcp 5354 \
   --tsig-name tsig-key-1752130646 --tsig-secret 2vgKc8+... \
-  --forwarder 8.8.8.8  #if You want it as a local DNS server.If You want it as an ANS,don't forward
+  --forwarders 8.8.8.8 127.0.0.1:3353  # Multiple forwarders for redundancy
 
 # Terminal 2: Secondary server (authoritative only)
 python -m dns_server.main --port-udp 7353 --port-tcp 7354 --secondary \
@@ -63,7 +69,7 @@ python -m dns_server.main --port-udp 7353 --port-tcp 7354 --secondary \
 
 # Terminal 3: Secondary server with forwarding (hybrid)  
 python -m dns_server.main --port-udp 8353 --port-tcp 8354 --secondary \
-  --primary-server 127.0.0.1 --primary-port 5354 --forwarder 8.8.8.8 \
+  --primary-server 127.0.0.1 --primary-port 5354 --forwarders 8.8.8.8 1.1.1.1 \
   --tsig-name tsig-key-1752130646 --tsig-secret 2vgKc8+...
 
 # Test zone transfer: dig @127.0.0.1 -p 5353 example.com AXFR +tcp

@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+
+# Project specific
+logs/
+*.log
+.env
+.DS_Store
+.vscode/
+.git/
+.gitignore
+
+# Reports and docs
+report/
+docs/
+*.md
+*.tex
+*.pdf
+
+# Test files
+test_*.py
+*_test.py

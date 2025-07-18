@@ -1,18 +1,19 @@
-import threading, copy, time
+import threading, copy, time, random
 import logging
 import dns.message, dns.zone, dns.dnssec, dns.update, dns.resolver, dns.query, dns.exception  # type: ignore
 from cryptography.hazmat.primitives import serialization
 from .utils.tsig import TSIGAuthenticator
-from .utils.cache import Cache
+from .utils.dns_cache import DNSCache, create_cache
 from .utils.acl import ACL
 from .utils.metrics import MetricsCollector
 from .utils.rate_limiter import RateLimiter
 
 class DNSHandler:
-    def __init__(self, zone_file, key_file=None, forwarder=None,
+    def __init__(self, zone_file, key_file=None, forwarder=None, forwarders=None,
                 acl_rules=None, tsig_key=None, is_secondary=False,
                 primary_server=None, primary_port=None, refresh_interval=None,
-                rate_limit_threshold=100, rate_limit_window=5, rate_limit_ban_duration=300):
+                rate_limit_threshold=100, rate_limit_window=5, rate_limit_ban_duration=300,
+                cache_type="lru", cache_size=10000, redis_url=None):
         self.zone_file = zone_file
         self.zone = dns.zone.from_file(zone_file, relativize=False)
         self.lock = threading.Lock()
@@ -24,24 +25,64 @@ class DNSHandler:
         server_type = "secondary" if is_secondary else "primary"
         logging.info("Loaded zone from %s (running as %s)", zone_file, server_type)
         
-        self.cache = Cache()
+        # Initialize enhanced cache
+        try:
+            if cache_type == "redis" and redis_url:
+                self.cache = create_cache("redis", redis_url=redis_url)
+                logging.info("Using Redis cache at %s", redis_url)
+            elif cache_type == "hybrid":
+                kwargs = {"memory_cache_size": cache_size}
+                if redis_url:
+                    kwargs["redis_url"] = redis_url
+                self.cache = create_cache("hybrid", **kwargs)
+                logging.info("Using hybrid cache (memory + Redis)")
+            elif cache_type == "lru":
+                self.cache = create_cache("lru", max_size=cache_size)
+                logging.info("Using LRU cache with max size %d", cache_size)
+            else:
+                self.cache = DNSCache()  # Fallback to simple cache
+                logging.info("Using simple cache")
+        except Exception as e:
+            logging.warning("Failed to initialize %s cache: %s. Using simple cache.", cache_type, e)
+            self.cache = DNSCache()
+        
         self.acl = ACL(**(acl_rules or {}))
         self.metrics = MetricsCollector()
         
-        # Parse forwarder - extract IP and port if IP:port format is used
+        # Initialize forwarders - support both single and multiple forwarders
+        self.forwarders = []  # List of (host, port) tuples
+        self.forwarder_index = 0  # For round-robin selection
+        self.forwarder_lock = threading.Lock()
+        
+        # Handle backward compatibility with single forwarder
         if forwarder:
-            if ':' in forwarder:
-                # Extract IP and port from IP:port format
-                parts = forwarder.split(':')
-                self.forwarder = parts[0]
-                self.forwarder_port = int(parts[1])
-                logging.info("Forwarder configured: %s:%d (from %s)", self.forwarder, self.forwarder_port, forwarder)
+            if forwarders:
+                forwarders = [forwarder] + forwarders
             else:
-                self.forwarder = forwarder
-                self.forwarder_port = 53  # Default DNS port
-                logging.info("Forwarder configured: %s:%d", self.forwarder, self.forwarder_port)
+                forwarders = [forwarder]
+                
+        # Parse forwarders - extract IP and port if IP:port format is used
+        if forwarders:
+            for fw in forwarders:
+                if ':' in fw:
+                    # Extract IP and port from IP:port format
+                    parts = fw.split(':')
+                    host = parts[0]
+                    port = int(parts[1])
+                else:
+                    host = fw
+                    port = 53  # Default DNS port
+                
+                self.forwarders.append((host, port))
+                logging.info("Forwarder configured: %s:%d", host, port)
+        
+        # Keep backward compatibility for existing code
+        if self.forwarders:
+            self.forwarder = self.forwarders[0][0]
+            self.forwarder_port = self.forwarders[0][1]
+            logging.info("Multiple forwarders configured: %d servers", len(self.forwarders))
         else:
-            self.forwarder = forwarder
+            self.forwarder = None
             self.forwarder_port = 53
         
         # Initialize rate limiter with DOS protection
@@ -72,6 +113,37 @@ class DNSHandler:
             # Start zone refresh thread for secondary
             self._start_zone_refresh()
 
+    def _get_next_forwarder(self):
+        """Get the next forwarder using round-robin selection"""
+        if not self.forwarders:
+            return None, None
+            
+        with self.forwarder_lock:
+            host, port = self.forwarders[self.forwarder_index]
+            self.forwarder_index = (self.forwarder_index + 1) % len(self.forwarders)
+            return host, port
+
+    def _get_random_forwarder(self):
+        """Get a random forwarder (useful for retry logic)"""
+        if not self.forwarders:
+            return None, None
+        return random.choice(self.forwarders)
+
+    def _try_forwarder(self, query_msg, host, port, timeout=5):
+        """Try to forward a query to a specific forwarder"""
+        try:
+            # Forward using UDP first, fall back to TCP if needed
+            try:
+                response = dns.query.udp(query_msg, host, port=port, timeout=timeout)
+                return response
+            except dns.exception.Timeout:
+                # Try TCP on timeout
+                response = dns.query.tcp(query_msg, host, port=port, timeout=timeout)
+                return response
+        except Exception as e:
+            logging.warning("Failed to forward query to %s:%d: %s", host, port, e)
+            return None
+
     def _publish_dnskey(self):
         origin = self.zone.origin
         node = self.zone.nodes.get(origin) or self.zone.node_factory()
@@ -86,10 +158,43 @@ class DNSHandler:
         )
         rr.add(pub)
 
+    def _is_likely_dns_traffic(self, wire):
+        """Quick check to determine if incoming data looks like DNS traffic"""
+        if not wire or len(wire) < 12:  # DNS header is 12 bytes minimum
+            return False
+        
+        # Check if it could be a DNS message by looking at the header
+        try:
+            # Basic DNS header structure check
+            # First 2 bytes: ID
+            # Next 2 bytes: Flags (QR, Opcode, AA, TC, RD, RA, Z, RCODE)
+            flags = (wire[2] << 8) | wire[3]
+            qr = (flags >> 15) & 1  # Query/Response bit
+            opcode = (flags >> 11) & 0xF  # Opcode
+            
+            # Valid DNS opcodes: 0=QUERY, 1=IQUERY, 2=STATUS, 4=NOTIFY, 5=UPDATE
+            if opcode not in (0, 1, 2, 4, 5):
+                return False
+            
+            # Check question count (bytes 4-5)
+            qdcount = (wire[4] << 8) | wire[5]
+            if qdcount > 100:  # Unreasonably high question count
+                return False
+            
+            return True
+        except (IndexError, TypeError):
+            return False
+
     def handle(self, wire, addr):
         client_ip = addr[0] if addr else None
         logging.info("Received request from %s (%d bytes)", client_ip, len(wire or b""))
         self.metrics.inc_queries()
+        
+        # Early filtering for non-DNS traffic
+        if not self._is_likely_dns_traffic(wire):
+            logging.debug("Received non-DNS traffic from %s, ignoring", client_ip)
+            self.metrics.inc_errors()
+            return None, None
         
         # Step 1: Rate limiting check (DOS protection)
         if client_ip and not self.rate_limiter.is_allowed(client_ip):
@@ -109,12 +214,12 @@ class DNSHandler:
                 msg = dns.message.from_wire(wire, keyring=keyring)
             except dns.tsig.BadSignature as e:
                 if keyring:
-                    logging.warning("TSIG signature validation failed: %s", e)
+                    logging.warning("TSIG signature validation failed from %s: %s", client_ip, e)
                     self.metrics.inc_errors()
                     return None, None
                 else:
                     # No keyring configured, but message has TSIG - reject with FormErr
-                    logging.warning("Received TSIG-signed message but no TSIG key configured")
+                    logging.warning("Received TSIG-signed message but no TSIG key configured from %s", client_ip)
                     self.metrics.inc_errors()
                     # Return a FORMERR response
                     try:
@@ -124,23 +229,50 @@ class DNSHandler:
                         return resp.to_wire(), None
                     except Exception:
                         return None, None
+            except dns.exception.FormError as e:
+                logging.debug("Received malformed DNS message from %s: %s", client_ip, e)
+                self.metrics.inc_errors()
+                return None, None
             except Exception as e:
                 if "keyring" in str(e).lower() or "tsig" in str(e).lower():
-                    logging.warning("TSIG-related parsing error: %s", e)
+                    logging.warning("TSIG-related parsing error from %s: %s", client_ip, e)
                     self.metrics.inc_errors()
                     return None, None
                 else:
-                    # Re-raise other parsing errors
-                    raise
+                    # Handle other parsing errors more gracefully
+                    logging.debug("DNS message parsing error from %s: %s", client_ip, e)
+                    self.metrics.inc_errors()
+                    return None, None
             
             # Validate that the message has questions
             if not msg.question:
-                logging.warning("Received DNS message with no questions from %s, ignoring", client_ip)
+                logging.debug("Received DNS message with no questions from %s, ignoring", client_ip)
+                self.metrics.inc_errors()
+                return None, None
+            
+            # Validate message opcode early to catch malformed messages
+            try:
+                opcode = msg.opcode()
+                if opcode not in (dns.opcode.QUERY, dns.opcode.UPDATE, dns.opcode.NOTIFY):
+                    logging.debug("Received DNS message with unsupported opcode %s from %s, ignoring", 
+                                dns.opcode.to_text(opcode), client_ip)
+                    self.metrics.inc_errors()
+                    return None, None
+            except Exception as e:
+                logging.debug("Failed to get opcode from DNS message from %s: %s", client_ip, e)
                 self.metrics.inc_errors()
                 return None, None
             
             q = msg.question[0]
             qtype = dns.rdatatype.to_text(q.rdtype)
+            
+            # Filter out .local domains (mDNS/Bonjour traffic)
+            if str(q.name).lower().endswith('.local.'):
+                logging.debug("Ignoring .local domain query: %s %s (mDNS traffic)", q.name, qtype)
+                # Return NXDOMAIN for .local queries
+                resp = dns.message.make_response(msg)
+                resp.set_rcode(dns.rcode.NXDOMAIN)
+                return resp.to_wire(), None
             
             # Check if TSIG is required for this operation type
             requires_tsig = (msg.opcode() == dns.opcode.UPDATE or qtype in ('AXFR', 'IXFR'))
@@ -217,9 +349,13 @@ class DNSHandler:
                 resp.use_tsig(self.tsig.keyring, keyname=self.tsig.key_name)
             logging.info("Answered query for %s %s", q.name, qtype)
             return resp.to_wire(), None
-        except Exception:
+        except Exception as e:
             self.metrics.inc_errors()
-            logging.exception("Error handling request")
+            # Don't log full stack traces for common malformed message errors
+            if "FormError" in str(e) or "not a query" in str(e):
+                logging.debug("Malformed DNS message from %s: %s", client_ip, e)
+            else:
+                logging.exception("Error handling request from %s", client_ip)
             return None, None
 
     def _do_query(self, msg):
@@ -236,10 +372,11 @@ class DNSHandler:
         try:
             resp = dns.message.make_response(msg)
         except dns.exception.FormError as e:
-            logging.warning("Cannot create response for message: %s", e)
+            logging.debug("Cannot create response for malformed message from %s: %s", 
+                         msg.question[0].name if msg.question else "unknown", e)
             return None
         except Exception as e:
-            logging.warning("Unexpected error creating response: %s", e)
+            logging.debug("Unexpected error creating response: %s", e)
             return None
             
         q = msg.question[0]
@@ -260,19 +397,29 @@ class DNSHandler:
             else:
                 raise KeyError
         except KeyError:
-            if self.forwarder:
-                logging.info("Forwarding query %s %s to %s:%d", q.name, dns.rdatatype.to_text(q.rdtype), self.forwarder, self.forwarder_port)
-                try:
-                    # Create a query message for forwarding
-                    forward_query = dns.message.make_query(q.name, q.rdtype, q.rdclass)
-                    
-                    # Forward using UDP first, fall back to TCP if needed
-                    try:
-                        response = dns.query.udp(forward_query, self.forwarder, port=self.forwarder_port, timeout=5)
-                    except dns.exception.Timeout:
-                        # Try TCP on timeout
-                        response = dns.query.tcp(forward_query, self.forwarder, port=self.forwarder_port, timeout=5)
-                    
+            if self.forwarders:
+                # Try to forward to multiple upstream servers
+                forward_query = dns.message.make_query(q.name, q.rdtype, q.rdclass)
+                response = None
+                
+                # First try: use round-robin selection
+                primary_host, primary_port = self._get_next_forwarder()
+                if primary_host:
+                    logging.info("Forwarding query %s %s to %s:%d", q.name, dns.rdatatype.to_text(q.rdtype), primary_host, primary_port)
+                    response = self._try_forwarder(forward_query, primary_host, primary_port)
+                
+                # If primary forwarder failed, try other forwarders
+                if not response and len(self.forwarders) > 1:
+                    logging.info("Primary forwarder failed, trying other forwarders...")
+                    for _ in range(len(self.forwarders) - 1):  # Try remaining forwarders
+                        backup_host, backup_port = self._get_next_forwarder()
+                        if backup_host and (backup_host, backup_port) != (primary_host, primary_port):
+                            logging.info("Trying backup forwarder %s:%d", backup_host, backup_port)
+                            response = self._try_forwarder(forward_query, backup_host, backup_port)
+                            if response:
+                                break
+                
+                if response:
                     # Extract answer from response
                     if response.answer:
                         for rr in response.answer:
@@ -295,15 +442,13 @@ class DNSHandler:
                         # No answer in response
                         resp.set_rcode(response.rcode())
                         
-                except dns.resolver.NXDOMAIN:
-                    logging.info("NXDOMAIN from upstream for %s %s", q.name, dns.rdatatype.to_text(q.rdtype))
-                    resp.set_rcode(dns.rcode.NXDOMAIN)
-                except (dns.exception.Timeout, OSError) as e:
-                    logging.warning("Timeout/connection error querying upstream %s:%d for %s %s: %s", 
-                                  self.forwarder, self.forwarder_port, q.name, dns.rdatatype.to_text(q.rdtype), e)
-                    resp.set_rcode(dns.rcode.SERVFAIL)
-                except Exception as e:
-                    logging.error("Error querying upstream %s:%d for %s %s: %s", self.forwarder, self.forwarder_port, q.name, dns.rdatatype.to_text(q.rdtype), e)
+                    # Check for NXDOMAIN
+                    if response.rcode() == dns.rcode.NXDOMAIN:
+                        logging.info("NXDOMAIN from upstream for %s %s", q.name, dns.rdatatype.to_text(q.rdtype))
+                        resp.set_rcode(dns.rcode.NXDOMAIN)
+                else:
+                    # All forwarders failed
+                    logging.error("All forwarders failed for %s %s", q.name, dns.rdatatype.to_text(q.rdtype))
                     resp.set_rcode(dns.rcode.SERVFAIL)
             else:
                 logging.info("NXDOMAIN for %s %s", q.name, dns.rdatatype.to_text(q.rdtype))
@@ -705,3 +850,21 @@ class DNSHandler:
             resp = dns.message.make_response(msg)
             resp.set_rcode(dns.rcode.SERVFAIL)
             return resp
+
+    def get_cache_stats(self):
+        """Get cache statistics if available"""
+        if hasattr(self.cache, 'get_stats'):
+            return self.cache.get_stats()
+        elif hasattr(self.cache, 'get_size'):
+            return {"size": self.cache.get_size(), "type": "lru"}
+        else:
+            return {"type": "simple", "stats": "not available"}
+    
+    def cleanup_cache(self):
+        """Clean up expired cache entries if supported"""
+        if hasattr(self.cache, 'cleanup_expired'):
+            removed = self.cache.cleanup_expired()
+            if removed > 0:
+                logging.info("Cleaned up %d expired cache entries", removed)
+            return removed
+        return 0

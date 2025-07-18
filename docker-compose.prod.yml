@@ -1,0 +1,73 @@
+# Production - Full security, high availability
+version: '3.8'
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: dns-redis-prod
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_prod_data:/data
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-dnsserver2024}
+    restart: unless-stopped
+
+  dns-primary-prod:
+    build: .
+    container_name: dns-primary-prod
+    ports:
+      - "53:53/udp"
+      - "53:53/tcp"
+      - "853:853/tcp"
+    environment:
+      - DNS_MODE=production
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-dnsserver2024}
+    command: >
+      --zone /app/dns_server/zones/primary.zone
+      --port-udp 53 --port-tcp 53 --port-dot 853
+      --certfile /app/dns_server/certs/cert.pem
+      --certkey /app/dns_server/certs/key.pem
+      --forwarder 8.8.8.8
+      --cache-type hybrid --cache-size 50000
+      --redis-url redis://:${REDIS_PASSWORD:-dnsserver2024}@redis:6379/0
+      --tsig-name tsig-key-1752130646
+      --tsig-secret 2vgKc8+OH9UMBrRYTBYOmjffLACFVtGQPgXjt6fw05k=
+      --rate-limit-threshold 100 --rate-limit-window 10
+      --allow 0.0.0.0/0
+    depends_on:
+      - redis
+    volumes:
+      - ./dns_server/zones:/app/dns_server/zones:ro
+      - ./dns_server/certs:/app/dns_server/certs:ro
+      - ./logs:/app/logs
+    restart: unless-stopped
+
+  dns-secondary-prod:
+    build: .
+    container_name: dns-secondary-prod
+    ports:
+      - "54:54/udp"
+      - "54:54/tcp"
+    environment:
+      - DNS_MODE=production
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-dnsserver2024}
+    command: >
+      --port-udp 54 --port-tcp 54
+      --secondary
+      --primary-server dns-primary-prod --primary-port 53
+      --forwarder 1.1.1.1
+      --cache-type redis
+      --redis-url redis://:${REDIS_PASSWORD:-dnsserver2024}@redis:6379/1
+      --tsig-name tsig-key-1752130646
+      --tsig-secret 2vgKc8+OH9UMBrRYTBYOmjffLACFVtGQPgXjt6fw05k=
+      --rate-limit-threshold 100 --rate-limit-window 10
+    depends_on:
+      - redis
+      - dns-primary-prod
+    volumes:
+      - ./logs:/app/logs
+    restart: unless-stopped
+
+volumes:
+  redis_prod_data:
+    driver: local
