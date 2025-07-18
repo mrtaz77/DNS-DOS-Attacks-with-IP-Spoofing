@@ -278,10 +278,19 @@ class DNSHandler:
                         for rr in response.answer:
                             if rr.rdtype == q.rdtype:
                                 resp.answer.append(rr)
+                                # Cache the forwarded response
+                                ttl = rr.ttl
+                                self.cache.set(q.name, dns.rdatatype.to_text(q.rdtype), rr, ttl)
+                                logging.info("Cached forwarded response for %s %s (ttl=%d)", q.name, dns.rdatatype.to_text(q.rdtype), ttl)
                                 break
                         if not resp.answer:
                             # Add first answer even if type doesn't match exactly
-                            resp.answer.append(response.answer[0])
+                            first_rr = response.answer[0]
+                            resp.answer.append(first_rr)
+                            # Cache it anyway
+                            ttl = first_rr.ttl
+                            self.cache.set(q.name, dns.rdatatype.to_text(first_rr.rdtype), first_rr, ttl)
+                            logging.info("Cached forwarded response for %s %s (ttl=%d)", q.name, dns.rdatatype.to_text(first_rr.rdtype), ttl)
                     else:
                         # No answer in response
                         resp.set_rcode(response.rcode())
