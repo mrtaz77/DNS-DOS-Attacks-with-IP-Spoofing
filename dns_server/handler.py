@@ -163,6 +163,14 @@ class DNSHandler:
             q = msg.question[0]
             qtype = dns.rdatatype.to_text(q.rdtype)
             
+            # Filter out .local domains (mDNS/Bonjour traffic)
+            if str(q.name).lower().endswith('.local.'):
+                logging.debug("Ignoring .local domain query: %s %s (mDNS traffic)", q.name, qtype)
+                # Return NXDOMAIN for .local queries
+                resp = dns.message.make_response(msg)
+                resp.set_rcode(dns.rcode.NXDOMAIN)
+                return resp.to_wire(), None
+            
             # Check if TSIG is required for this operation type
             requires_tsig = (msg.opcode() == dns.opcode.UPDATE or qtype in ('AXFR', 'IXFR'))
             

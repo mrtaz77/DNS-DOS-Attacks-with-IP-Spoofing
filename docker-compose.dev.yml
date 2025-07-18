@@ -1,0 +1,30 @@
+# Development - Simple single server setup
+version: '3.8'
+
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6380:6379"
+    command: redis-server --appendonly yes
+
+  dns-dev:
+    build: .
+    container_name: dns-dev
+    ports:
+      - "9353:9353/udp"
+      - "9354:9354/tcp"
+    environment:
+      - DNS_MODE=development
+    command: >
+      --zone /app/dns_server/zones/primary.zone
+      --port-udp 9353
+      --port-tcp 9354
+      --forwarder 8.8.8.8
+      --cache-type hybrid --cache-size 5000
+      --redis-url redis://redis:6379/0
+    depends_on:
+      - redis
+    volumes:
+      - ./dns_server/zones:/app/dns_server/zones:ro
+      - ./logs:/app/logs
