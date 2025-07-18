@@ -217,9 +217,9 @@ class DNSHandler:
                 resp.use_tsig(self.tsig.keyring, keyname=self.tsig.key_name)
             logging.info("Answered query for %s %s", q.name, qtype)
             return resp.to_wire(), None
-        except Exception:
+        except Exception as e:
             self.metrics.inc_errors()
-            logging.exception("Error handling request")
+            logging.exception("Error handling request: %s", e)
             return None, None
 
     def _do_query(self, msg):
