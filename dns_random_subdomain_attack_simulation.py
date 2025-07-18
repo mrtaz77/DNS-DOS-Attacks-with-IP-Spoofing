@@ -22,7 +22,7 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(threadName)s - %(levelname)s - %(message)s",
     handlers=[
-        logging.FileHandler("dns_subdomain_flood_simulation.log"),
+        logging.FileHandler(f"{LOGGING_DIR}/dns_subdomain_flood_simulation.log"),
         logging.StreamHandler(),
     ],
 )
@@ -671,15 +671,18 @@ class DNSSubdomainFloodSimulation:
             "sample_count": len(self.metrics["during_attack"]),
         }
 
-        # Calculate performance degradation
+        # Calculate performance degradation as a ratio
         if self.metrics["baseline"]:
             baseline_avg = mean(
                 [m["response_time_ms"] for m in self.metrics["baseline"]]
             )
             attack_avg = mean(attack_times)
-            attack_data["performance_degradation_percent"] = round(
-                ((attack_avg - baseline_avg) / baseline_avg) * 100, 2
-            )
+            if baseline_avg > 0:
+                attack_data["performance_degradation_ratio"] = round(
+                    attack_avg / baseline_avg, 2
+                )
+            else:
+                attack_data["performance_degradation_ratio"] = None
 
         return attack_data
 
@@ -723,7 +726,7 @@ class DNSSubdomainFloodSimulation:
         """Analyze DNS-specific DoS indicators"""
         dos_data = {
             "attack_detected": len(self.metrics["during_attack"]) > 0,
-            "max_response_degradation": 0,
+            "max_response_time_ratio": 0,
             "service_disruption_detected": False,
         }
 
@@ -735,11 +738,15 @@ class DNSSubdomainFloodSimulation:
                 [m["response_time_ms"] for m in self.metrics["during_attack"]]
             )
 
-            degradation = ((attack_max - baseline_avg) / baseline_avg) * 100
-            dos_data["max_response_degradation"] = round(degradation, 2)
-            dos_data["service_disruption_detected"] = (
-                degradation > 300
-            )  # 300% degradation threshold
+            if baseline_avg > 0:
+                ratio = attack_max / baseline_avg
+                dos_data["max_response_time_ratio"] = round(ratio, 2)
+                dos_data["service_disruption_detected"] = (
+                    ratio > 4.0  # 4x degradation threshold
+                )
+            else:
+                dos_data["max_response_time_ratio"] = None
+                dos_data["service_disruption_detected"] = False
 
         return dos_data
 
@@ -780,10 +787,12 @@ class DNSSubdomainFloodSimulation:
             print(f"\tMax Response Time: {impact['max_response_time_ms']}ms")
             print(f"\tFailure Rate: {impact['failure_rate_percent']}%")
             print(f"\tTimeout Rate: {impact['timeout_rate_percent']}%")
-            if "performance_degradation_percent" in impact:
-                print(
-                    f"\tPerformance Degradation: {impact['performance_degradation_percent']}%"
-                )
+            if "performance_degradation_ratio" in impact:
+                ratio = impact["performance_degradation_ratio"]
+                if ratio is not None:
+                    print(f"\tPerformance Degradation: {ratio}x slower than baseline")
+                else:
+                    print("\tPerformance Degradation: N/A")
 
         if report["client_impact"]:
             client = report["client_impact"]
@@ -799,7 +808,10 @@ class DNSSubdomainFloodSimulation:
         print(
             f"\tService Disruption: {'✅ YES' if dos['service_disruption_detected'] else '❌ NO'}"
         )
-        print(f"\tMax Degradation: {dos['max_response_degradation']}%")
+        if dos["max_response_time_ratio"] is not None:
+            print(f"\tMax Degradation: {dos['max_response_time_ratio']}x slower than baseline")
+        else:
+            print("\tMax Degradation: N/A")
         print("=" * 90)
 
     def generate_comprehensive_report(self):

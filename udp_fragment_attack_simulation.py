@@ -20,7 +20,7 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(threadName)s - %(levelname)s - %(message)s",
     handlers=[
-        logging.FileHandler("udp_fragment_attack_simulation.log"),
+        logging.FileHandler(f"{LOGGING_DIR}/udp_fragment_attack_simulation.log"),
         logging.StreamHandler(),
     ],
 )
@@ -337,11 +337,6 @@ class UDPFragmentFloodSimulation:
                     f"Actual duration: {attack_end - attack_start:.2f} seconds\n"
                 )
                 log_file.write(f"Fragment packets sent: {attack.packets_sent}\n")
-                log_file.write(
-                    f"Estimated fragments generated: {attack.packets_sent * 3}\n"
-                )  # Approx 3 fragments per packet
-                log_file.write("Target memory pressure: SEVERE\n")
-                log_file.write("Fragment reassembly impact: HIGH\n")
 
             fragment_attack_stats = {
                 "attack_type": "udp-fragmented-flood",
@@ -565,15 +560,18 @@ class UDPFragmentFloodSimulation:
             "sample_count": len(self.metrics["during_attack"]),
         }
 
-        # Calculate performance degradation from fragment attack
+        # Calculate performance degradation as a ratio
         if self.metrics["baseline"]:
             baseline_avg = mean(
                 [m["response_time_ms"] for m in self.metrics["baseline"]]
             )
             attack_avg = mean(attack_times)
-            attack_data["performance_degradation_percent"] = round(
-                ((attack_avg - baseline_avg) / baseline_avg) * 100, 2
-            )
+            if baseline_avg > 0:
+                attack_data["performance_degradation_ratio"] = round(
+                    attack_avg / baseline_avg, 2
+                )
+            else:
+                attack_data["performance_degradation_ratio"] = None
 
         return attack_data
 
@@ -636,7 +634,7 @@ class UDPFragmentFloodSimulation:
         """Analyze fragment-specific DoS indicators"""
         dos_data = {
             "fragment_attack_detected": len(self.metrics["during_attack"]) > 0,
-            "max_response_degradation": 0,
+            "max_response_time_ratio": 0,
             "service_disruption_detected": False,
             "memory_pressure_indicators": False,
             "fragment_reassembly_impact": "UNKNOWN",
@@ -650,14 +648,19 @@ class UDPFragmentFloodSimulation:
                 [m["response_time_ms"] for m in self.metrics["during_attack"]]
             )
 
-            degradation = ((attack_max - baseline_avg) / baseline_avg) * 100
-            dos_data["max_response_degradation"] = round(degradation, 2)
-            dos_data["service_disruption_detected"] = (
-                degradation > 300
-            )  # 300% degradation threshold
-            dos_data["memory_pressure_indicators"] = (
-                degradation > 500
-            )  # Severe degradation indicates memory pressure
+            if baseline_avg > 0:
+                ratio = attack_max / baseline_avg
+                dos_data["max_response_time_ratio"] = round(ratio, 2)
+                dos_data["service_disruption_detected"] = (
+                    ratio > 4.0  # 4x degradation threshold
+                )
+                dos_data["memory_pressure_indicators"] = (
+                    ratio > 6.0  # Severe degradation indicates memory pressure
+                )
+            else:
+                dos_data["max_response_time_ratio"] = None
+                dos_data["service_disruption_detected"] = False
+                dos_data["memory_pressure_indicators"] = False
 
         # Analyze fragment reassembly impact
         if "fragment_attack_stats" in self.metrics:
@@ -716,10 +719,12 @@ class UDPFragmentFloodSimulation:
             print(f"   Max Response Time: {impact['max_response_time_ms']}ms")
             print(f"   Failure Rate: {impact['failure_rate_percent']}%")
             print(f"   Timeout Rate: {impact['timeout_rate_percent']}%")
-            if "performance_degradation_percent" in impact:
-                print(
-                    f"   Performance Degradation: {impact['performance_degradation_percent']}%"
-                )
+            if "performance_degradation_ratio" in impact:
+                ratio = impact["performance_degradation_ratio"]
+                if ratio is not None:
+                    print(f"   Performance Degradation: {ratio}x slower than baseline")
+                else:
+                    print("   Performance Degradation: N/A")
 
         if report["client_impact"]:
             client = report["client_impact"]
@@ -740,8 +745,10 @@ class UDPFragmentFloodSimulation:
         print(
             f"   Memory Pressure: {'✅ YES' if dos['memory_pressure_indicators'] else '❌ NO'}"
         )
-        print(f"   Max Degradation: {dos['max_response_degradation']}%")
-        print(f"   Fragment Reassembly Impact: {dos['fragment_reassembly_impact']}")
+        if dos["max_response_time_ratio"] is not None:
+            print(f"   Max Degradation: {dos['max_response_time_ratio']}x slower than baseline")
+        else:
+            print("   Max Degradation: N/A")
 
         print("\n📁 Detailed logs saved in: logs/ directory")
         print("   - dns_server_fragment_attack.log: DNS server under attack")
@@ -858,12 +865,24 @@ class UDPFragmentFloodSimulation:
             # Wait for attack thread to complete (determines simulation end)
             threads[2].join()  # Wait for UDP fragment attack thread
             logging.info("UDP fragment attack thread completed")
+            print("\n🔥 UDP FRAGMENT ATTACK PHASE COMPLETED")
+            print("🔍 Continuing post-attack monitoring and recovery assessment...")
 
-            # Allow time for post-attack monitoring and recovery assessment
-            time.sleep(10)
+            # Extended post-attack monitoring period (30 seconds)
+            post_attack_duration = 30
+            logging.info(
+                f"Starting {post_attack_duration}s post-attack monitoring period"
+            )
+
+            for remaining in range(post_attack_duration, 0, -5):
+                print(f"⏱️  Post-attack monitoring: {remaining}s remaining...")
+                time.sleep(5)
+
+            print("✅ Post-attack monitoring completed")
 
             # Signal stop and wait for other threads
             self.stop_event.set()
+            logging.info("Signaling all threads to stop gracefully")
 
             for i, thread in enumerate(threads):
                 if i != 2:  # Skip attack thread (already completed)
@@ -872,6 +891,7 @@ class UDPFragmentFloodSimulation:
                         logging.warning(f"{thread.name} did not stop gracefully")
 
             # Generate comprehensive fragment attack report
+            print("\n📊 Generating comprehensive attack report...")
             self.generate_comprehensive_report()
 
         except KeyboardInterrupt:
