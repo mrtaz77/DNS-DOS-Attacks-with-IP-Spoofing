@@ -39,6 +39,13 @@ def main():
     parser.add_argument("--rate-limit-threshold", type=int, default=100, help="Maximum queries per IP in time window")
     parser.add_argument("--rate-limit-window", type=int, default=5, help="Rate limit time window in seconds")
     parser.add_argument("--rate-limit-ban-duration", type=int, default=300, help="IP ban duration in seconds")
+    
+    # Cache configuration arguments
+    parser.add_argument("--cache-type", choices=["simple", "lru", "redis", "hybrid"], default="lru", 
+                       help="Cache type: simple (no limit), lru (in-memory), redis (persistent), hybrid (memory+redis)")
+    parser.add_argument("--cache-size", type=int, default=10000, help="Maximum cache entries for LRU/hybrid cache")
+    parser.add_argument("--redis-url", help="Redis URL for redis/hybrid cache (default: redis://localhost:6379/0)")
+    
     args = parser.parse_args()
 
     tsig = None
@@ -57,7 +64,10 @@ def main():
         refresh_interval=args.refresh_interval if args.secondary else None,
         rate_limit_threshold=args.rate_limit_threshold,
         rate_limit_window=args.rate_limit_window,
-        rate_limit_ban_duration=args.rate_limit_ban_duration
+        rate_limit_ban_duration=args.rate_limit_ban_duration,
+        cache_type=args.cache_type,
+        cache_size=args.cache_size,
+        redis_url=args.redis_url
     )
 
     threads = []

@@ -3,7 +3,7 @@ import logging
 import dns.message, dns.zone, dns.dnssec, dns.update, dns.resolver, dns.query, dns.exception  # type: ignore
 from cryptography.hazmat.primitives import serialization
 from .utils.tsig import TSIGAuthenticator
-from .utils.cache import Cache
+from .utils.dns_cache import DNSCache, create_cache
 from .utils.acl import ACL
 from .utils.metrics import MetricsCollector
 from .utils.rate_limiter import RateLimiter
@@ -12,7 +12,8 @@ class DNSHandler:
     def __init__(self, zone_file, key_file=None, forwarder=None,
                 acl_rules=None, tsig_key=None, is_secondary=False,
                 primary_server=None, primary_port=None, refresh_interval=None,
-                rate_limit_threshold=100, rate_limit_window=5, rate_limit_ban_duration=300):
+                rate_limit_threshold=100, rate_limit_window=5, rate_limit_ban_duration=300,
+                cache_type="lru", cache_size=10000, redis_url=None):
         self.zone_file = zone_file
         self.zone = dns.zone.from_file(zone_file, relativize=False)
         self.lock = threading.Lock()
@@ -24,7 +25,27 @@ class DNSHandler:
         server_type = "secondary" if is_secondary else "primary"
         logging.info("Loaded zone from %s (running as %s)", zone_file, server_type)
         
-        self.cache = Cache()
+        # Initialize enhanced cache
+        try:
+            if cache_type == "redis" and redis_url:
+                self.cache = create_cache("redis", redis_url=redis_url)
+                logging.info("Using Redis cache at %s", redis_url)
+            elif cache_type == "hybrid":
+                kwargs = {"memory_cache_size": cache_size}
+                if redis_url:
+                    kwargs["redis_url"] = redis_url
+                self.cache = create_cache("hybrid", **kwargs)
+                logging.info("Using hybrid cache (memory + Redis)")
+            elif cache_type == "lru":
+                self.cache = create_cache("lru", max_size=cache_size)
+                logging.info("Using LRU cache with max size %d", cache_size)
+            else:
+                self.cache = DNSCache()  # Fallback to simple cache
+                logging.info("Using simple cache")
+        except Exception as e:
+            logging.warning("Failed to initialize %s cache: %s. Using simple cache.", cache_type, e)
+            self.cache = DNSCache()
+        
         self.acl = ACL(**(acl_rules or {}))
         self.metrics = MetricsCollector()
         
@@ -705,3 +726,21 @@ class DNSHandler:
             resp = dns.message.make_response(msg)
             resp.set_rcode(dns.rcode.SERVFAIL)
             return resp
+
+    def get_cache_stats(self):
+        """Get cache statistics if available"""
+        if hasattr(self.cache, 'get_stats'):
+            return self.cache.get_stats()
+        elif hasattr(self.cache, 'get_size'):
+            return {"size": self.cache.get_size(), "type": "lru"}
+        else:
+            return {"type": "simple", "stats": "not available"}
+    
+    def cleanup_cache(self):
+        """Clean up expired cache entries if supported"""
+        if hasattr(self.cache, 'cleanup_expired'):
+            removed = self.cache.cleanup_expired()
+            if removed > 0:
+                logging.info("Cleaned up %d expired cache entries", removed)
+            return removed
+        return 0
