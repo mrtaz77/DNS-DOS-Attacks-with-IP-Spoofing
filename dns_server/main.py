@@ -21,6 +21,7 @@ def main():
     parser.add_argument("--tsig-name", help="TSIG key name (optional)")
     parser.add_argument("--tsig-secret", help="TSIG base64 secret (optional)")
     parser.add_argument("--forwarder", help="Upstream DNS forwarder IP or IP:port (default port 53)")
+    parser.add_argument("--forwarders", nargs="+", help="Multiple upstream DNS forwarders (IP or IP:port format)")
     parser.add_argument("--allow", nargs="*", default=[], help="ACL allow networks (CIDR)")
     parser.add_argument("--deny", nargs="*", default=[], help="ACL deny networks (CIDR)")
     parser.add_argument("--certfile", help="TLS certificate PEM for DoT/DoH (optional)")
@@ -48,6 +49,13 @@ def main():
     
     args = parser.parse_args()
 
+    # Handle both single forwarder and multiple forwarders
+    forwarders = []
+    if args.forwarder:
+        forwarders.append(args.forwarder)
+    if args.forwarders:
+        forwarders.extend(args.forwarders)
+
     tsig = None
     if args.tsig_name and args.tsig_secret:
         tsig = {"name": args.tsig_name, "secret": args.tsig_secret}
@@ -55,7 +63,7 @@ def main():
     handler = DNSHandler(
         zone_file=args.zone,
         key_file=args.keyfile,
-        forwarder=args.forwarder,
+        forwarders=forwarders,  # Changed from forwarder to forwarders
         acl_rules={"allow": args.allow, "deny": args.deny},
         tsig_key=tsig,
         is_secondary=args.secondary,
