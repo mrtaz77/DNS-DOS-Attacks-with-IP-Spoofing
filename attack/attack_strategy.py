@@ -56,7 +56,7 @@ class AttackStrategy(ABC):
         
         # Create formatters
         console_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-        file_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        file_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
         
         # Add formatters to handlers
         console_handler.setFormatter(console_formatter)
