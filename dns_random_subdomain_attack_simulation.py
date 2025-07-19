@@ -17,17 +17,6 @@ import string
 
 LOGGING_DIR = "dns-random-subdomain"
 
-# Setup logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(threadName)s - %(levelname)s - %(message)s",
-    handlers=[
-        logging.FileHandler(f"{LOGGING_DIR}/dns_subdomain_flood_simulation.log"),
-        logging.StreamHandler(),
-    ],
-)
-
-
 class DNSSubdomainFloodSimulation:
     """
     DNS Random Subdomain Query Flood Attack Simulation
@@ -81,6 +70,16 @@ class DNSSubdomainFloodSimulation:
         self.base_domains = ["example.com", "google.com", "test.com"]
 
         os.makedirs(f"{LOGGING_DIR}", exist_ok=True)
+
+        # Setup logging
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(asctime)s - %(threadName)s - %(levelname)s - %(message)s",
+            handlers=[
+                logging.FileHandler(f"{LOGGING_DIR}/dns_subdomain_flood_simulation.log"),
+                logging.StreamHandler(),
+            ],
+        )
 
     def target_dns_server_thread(self):
         """Thread 1: Target DNS Server (Recursive Resolver) - Primary Victim"""
