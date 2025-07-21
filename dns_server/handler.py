@@ -1,4 +1,4 @@
-import threading, copy, time, random
+import threading, copy, time, random, socket
 import logging
 import dns.message, dns.zone, dns.dnssec, dns.update, dns.resolver, dns.query, dns.exception  # type: ignore
 from cryptography.hazmat.primitives import serialization
@@ -95,8 +95,11 @@ class DNSHandler:
         # Initialize TSIG first
         if tsig_key:
             self.tsig = TSIGAuthenticator(tsig_key["name"], tsig_key["secret"])
+            logging.info("TSIG configured with key name: %s", self.tsig.key_name)
+            logging.info("TSIG keyring initialized with keys: %s", list(self.tsig.keyring.keys()))
         else:
             self.tsig = None
+            logging.info("No TSIG authentication configured")
             
         # Initialize DNSSEC
         if key_file:
@@ -663,9 +666,18 @@ class DNSHandler:
     def _perform_zone_transfer(self):
         """Perform AXFR or IXFR from primary and update local zone file"""
         if not self.is_secondary or not self.primary_server:
+            logging.debug("Zone transfer skipped: not secondary or no primary server configured")
             return False
             
         try:
+            logging.info("=== Starting zone transfer process ===")
+            logging.info("Zone: %s", self.zone.origin)
+            logging.info("Primary server: %s:%d", self.primary_server, self.primary_port)
+            logging.info("TSIG configured: %s", self.tsig is not None)
+            if self.tsig:
+                logging.info("TSIG key name: %s", self.tsig.key_name)
+                logging.info("TSIG keyring has keys: %s", list(self.tsig.keyring.keys()))
+            
             # Get current SOA serial
             zone_name = self.zone.origin
             current_serial = 0
@@ -695,11 +707,25 @@ class DNSHandler:
                     
                     # Use TSIG if available
                     if self.tsig:
+                        logging.info("Adding TSIG to IXFR query with key: %s", self.tsig.key_name)
                         ixfr_query.use_tsig(self.tsig.keyring, keyname=self.tsig.key_name)
+                        logging.info("TSIG added to IXFR query successfully")
+                    else:
+                        logging.info("No TSIG configured for IXFR query")
                     
                     # Perform IXFR
-                    logging.info("Attempting IXFR with current serial %d", current_serial)
-                    response = dns.query.tcp(ixfr_query, self.primary_server, 
+                    logging.info("Attempting IXFR with current serial %d to %s:%d", 
+                               current_serial, self.primary_server, self.primary_port)
+                    
+                    # Resolve hostname to IP to avoid Docker DNS issues
+                    try:
+                        primary_ip = socket.gethostbyname(self.primary_server)
+                        logging.info("Resolved primary server %s to IP: %s", self.primary_server, primary_ip)
+                    except socket.gaierror as e:
+                        logging.warning("Failed to resolve hostname %s: %s, using hostname directly", self.primary_server, e)
+                        primary_ip = self.primary_server
+                    
+                    response = dns.query.tcp(ixfr_query, primary_ip, 
                                            port=self.primary_port, timeout=20)
                     
                     if response.answer and len(response.answer) > 1:
@@ -741,21 +767,35 @@ class DNSHandler:
             
             # Fall back to AXFR if IXFR failed or wasn't attempted
             if not ixfr_successful:
-                logging.info("Starting periodic zone refresh from primary %s:%d", self.primary_server, self.primary_port)
+                logging.info("Starting AXFR from primary %s:%d", self.primary_server, self.primary_port)
                 
                 # Create AXFR request
                 if self.tsig:
+                    logging.info("Creating AXFR query with TSIG authentication")
                     keyring = self.tsig.keyring
                     keyname = self.tsig.key_name
+                    logging.info("Using TSIG key: %s", keyname)
+                    logging.info("Keyring contains: %s", list(keyring.keys()))
                     axfr_query = dns.message.make_query(zone_name, dns.rdatatype.AXFR)
                     axfr_query.use_tsig(keyring, keyname=keyname)
+                    logging.info("TSIG added to AXFR query successfully")
                 else:
+                    logging.info("Creating AXFR query WITHOUT TSIG authentication")
                     axfr_query = dns.message.make_query(zone_name, dns.rdatatype.AXFR)
                 
-                # Perform AXFR
-                response = dns.query.tcp(axfr_query, self.primary_server, 
+                logging.info("Sending AXFR query to %s:%d", self.primary_server, self.primary_port)
+                # Perform AXFR - resolve hostname to IP first to avoid Docker DNS issues
+                try:
+                    primary_ip = socket.gethostbyname(self.primary_server)
+                    logging.info("Resolved primary server %s to IP: %s", self.primary_server, primary_ip)
+                except socket.gaierror as e:
+                    logging.warning("Failed to resolve hostname %s: %s, using hostname directly", self.primary_server, e)
+                    primary_ip = self.primary_server
+                
+                response = dns.query.tcp(axfr_query, primary_ip, 
                                        port=self.primary_port, timeout=30)
                 
+                logging.info("AXFR response received, response code: %s", response.rcode())
                 if response.answer:
                     # Update local zone file with transferred data
                     with self.lock:
@@ -783,8 +823,29 @@ class DNSHandler:
             logging.info("Zone refresh completed successfully")
             return True
                 
+        except dns.tsig.BadSignature as e:
+            logging.error("TSIG authentication failed: %s", e)
+            logging.error("This suggests TSIG key mismatch or timing issues")
+            return False
+        except dns.tsig.BadTime as e:
+            logging.error("TSIG time validation failed: %s", e)
+            logging.error("Check system clocks on primary and secondary servers")
+            return False
+        except dns.exception.Timeout as e:
+            logging.error("Zone transfer timeout: %s", e)
+            return False
+        except dns.query.BadResponse as e:
+            logging.error("Bad response from primary server: %s", e)
+            return False
+        except ConnectionRefusedError as e:
+            logging.error("Connection refused by primary server %s:%d - %s", 
+                         self.primary_server, self.primary_port, e)
+            return False
         except Exception as e:
-            logging.error("Zone transfer failed: %s", e)
+            logging.error("Zone transfer failed with unexpected error: %s", e)
+            logging.error("Error type: %s", type(e).__name__)
+            import traceback
+            logging.error("Full traceback: %s", traceback.format_exc())
             return False
 
     def _forward_update_to_primary(self, msg):
