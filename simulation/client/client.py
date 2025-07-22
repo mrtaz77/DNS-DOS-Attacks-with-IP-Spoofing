@@ -166,13 +166,9 @@ def _display_parsed_records(names):
     table.add_column("Name", style="cyan")
     table.add_column("Type", style="yellow")
     
-    for rec_name, rtype in names[:10]:
+    for rec_name, rtype in names:
         table.add_row(rec_name, rtype)
         file_logger.debug(f"ZONE_RECORD - {rec_name} {rtype}")
-    
-    if len(names) > 10:
-        table.add_row("...", "...")
-        table.add_row(f"[dim]({len(names) - 10} more records)[/dim]", "")
     
     console.print(table)
 
@@ -444,10 +440,6 @@ def handle_successful_response(qname, qtype, result):
     """Handle successful DNS response."""
     elapsed = result["elapsed"]
     metrics.total_response_time += elapsed
-
-    file_logger.info(
-        f"SUCCESS - {qname} {qtype} completed in {elapsed:.3f}s"
-    )
 
     if elapsed > 1.0:
         metrics.delayed += 1
