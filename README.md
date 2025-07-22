@@ -54,6 +54,11 @@ pip install colorama dnspython
 
 ## Usage
 
+### Normal Client Simulation
+```
+python simulation/client/client.py --server <ip> --port <port> --zone <zone file>
+```
+
 ### Direct Attack Execution
 ```bash
 # UDP Fragmented Flood
