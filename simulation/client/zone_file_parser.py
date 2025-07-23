@@ -82,10 +82,27 @@ class ZoneParser:
         return names
 
     def generate_queries(self, zone_records, n=5):
-        """Return a list of random queries from zone file, plus some popular/non-existing domains."""
+        """Return a list of random queries from zone file, plus external domains."""
         queries = []
 
-        # Add records from zone file
+        hardcoded_queries = [
+            ("google.com.", "A"),
+            ("facebook.com.", "A"),
+            ("example.com.", "A"),
+            ("www.google.com.", "A"),
+            ("www.example.com.", "A"),
+            ("nonexistentdomain12345.com.", "A"),
+            ("doesnotexist.example.com.", "A"),
+            ("cloudflare.com.", "A"),
+            ("github.com.", "A"),
+            ("stackoverflow.com.", "A"),
+        ]
+
+        queries.extend(hardcoded_queries)
+        self.file_logger.info(
+            f"QUERY_PREP - Added {len(hardcoded_queries)} hardcoded queries"
+        )
+
         if zone_records:
             selected = random.sample(zone_records, min(n, len(zone_records)))
             queries.extend(selected)
@@ -93,18 +110,6 @@ class ZoneParser:
                 f"QUERY_PREP - Added {len(selected)} queries from zone file"
             )
 
-        # Add some popular and non-existing domains
-        external_queries = [
-            ("google.com.", "A"),
-            ("facebook.com.", "A"),
-            ("nonexistentdomain12345.com.", "A"),
-            ("example.com.", "A"),
-            ("doesnotexist.example.com.", "A"),
-            ("www.google.com.", "CNAME"),
-        ]
-        queries.extend(external_queries)
-        self.file_logger.info(
-            f"QUERY_PREP - Added {len(external_queries)} external queries, total: {len(queries)}"
-        )
+        self.file_logger.info(f"QUERY_PREP - Total queries prepared: {len(queries)}")
 
         return queries

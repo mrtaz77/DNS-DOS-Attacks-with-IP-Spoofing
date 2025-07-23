@@ -11,8 +11,6 @@ class ClientConfig:
         self.zone = None
         self.interval = 1.0
         self.timeout = 5.0
-        self.tsig_name = None
-        self.tsig_secret = None
         self.use_tcp = False
 
     @classmethod
@@ -33,8 +31,6 @@ class ClientConfig:
         parser.add_argument(
             "--timeout", type=float, default=5.0, help="Query timeout (seconds)"
         )
-        parser.add_argument("--tsig-name", help="TSIG key name for authentication")
-        parser.add_argument("--tsig-secret", help="TSIG secret key")
         parser.add_argument(
             "--use-tcp", action="store_true", help="Use TCP instead of UDP"
         )
@@ -47,8 +43,6 @@ class ClientConfig:
         config.zone = args.zone
         config.interval = args.interval
         config.timeout = args.timeout
-        config.tsig_name = args.tsig_name
-        config.tsig_secret = args.tsig_secret
         config.use_tcp = args.use_tcp
 
         return config
@@ -69,11 +63,6 @@ class ClientConfig:
 
         if self.zone and not Path(self.zone).exists():
             raise FileNotFoundError(f"Zone file not found: {self.zone}")
-
-    @property
-    def tsig_enabled(self):
-        """Check if TSIG is enabled"""
-        return bool(self.tsig_name and self.tsig_secret)
 
     @property
     def protocol(self):

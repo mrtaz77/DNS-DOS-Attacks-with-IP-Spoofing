@@ -4,7 +4,6 @@ import random
 from config import ClientConfig
 from logger import ClientLogger, console
 from metrics import Metrics
-from tsig_auth import TSIGClient
 from zone_file_parser import ZoneParser
 from query_handler import DNSQueryHandler
 from response_handler import DisplayHandler
@@ -19,7 +18,6 @@ class DNSClient:
         self.logger_setup = None
         self.file_logger = None
         self.metrics = None
-        self.tsig_client = None
         self.zone_parser = None
         self.query_handler = None
         self.display = None
@@ -51,9 +49,6 @@ class DNSClient:
 
         # Initialize components
         self.metrics = Metrics(self.file_logger)
-        self.tsig_client = TSIGClient(
-            self.config.tsig_name, self.config.tsig_secret, self.file_logger
-        )
         self.zone_parser = ZoneParser(self.file_logger)
         self.query_handler = DNSQueryHandler(self.file_logger)
         self.display = DisplayHandler(self.metrics, self.file_logger)
@@ -64,10 +59,16 @@ class DNSClient:
         if self.config.zone:
             zone_records = self.zone_parser.parse_zone_file(self.config.zone)
             if not zone_records:
-                console.print("[yellow]⚠️ No valid records found in zone file[/yellow]")
-                self.file_logger.warning(
-                    "ZONE_PARSE - No valid records found in zone file"
+                console.print(
+                    "[yellow]⚠️ No valid records found in zone file, using hardcoded domains[/yellow]"
                 )
+                self.file_logger.warning(
+                    "ZONE_PARSE - No valid records found in zone file, using hardcoded domains"
+                )
+        else:
+            console.print(
+                "[blue]ℹ️ No zone file specified, using hardcoded domains[/blue]"
+            )
 
         self.queries = self.zone_parser.generate_queries(zone_records, n=5)
         console.print(f"[green]✅ Prepared {len(self.queries)} queries[/green]")
@@ -75,7 +76,7 @@ class DNSClient:
     def test_connectivity(self):
         """Test server connectivity"""
         return self.query_handler.test_connectivity(
-            self.config.server, self.config.port, self.tsig_client
+            self.config.server, self.config.port
         )
 
     def handle_successful_response(self, qname, qtype, result):
@@ -90,7 +91,6 @@ class DNSClient:
             self.metrics.success += 1
             self.display.log_response(qname, qtype, result, "SUCCESS")
 
-        time.sleep(2)
         return 0  # Reset consecutive failures
 
     def handle_failed_response(
@@ -145,7 +145,6 @@ class DNSClient:
                     self.config.port,
                     qname,
                     qtype,
-                    self.tsig_client,
                     self.config.timeout,
                     self.config.use_tcp,
                 )

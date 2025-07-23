@@ -20,8 +20,6 @@ class DisplayHandler:
             f"STARTUP - Configuration: Zone={config.zone}, Interval={config.interval}s, Timeout={config.timeout}s"
         )
 
-        tsig_status = "Enabled" if config.tsig_enabled else "Disabled"
-
         console.print(
             Panel.fit(
                 "[bold blue]🌐 DNS Client Starting[/bold blue]\n"
@@ -29,7 +27,6 @@ class DisplayHandler:
                 f"Zone: {config.zone or 'None'}\n"
                 f"Interval: {config.interval}s\n"
                 f"Protocol: {config.protocol}\n"
-                f"TSIG: {tsig_status}\n"
                 f"Using: Raw DNS packets",
                 title="Configuration",
                 border_style="blue",
