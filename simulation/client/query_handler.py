@@ -12,20 +12,15 @@ class DNSQueryHandler:
     def __init__(self, file_logger):
         self.file_logger = file_logger
 
-    def send_query(
-        self, server, port, qname, qtype, tsig_client, timeout=10, use_tcp=False
-    ):
+    def send_query(self, server, port, qname, qtype, timeout=10, use_tcp=False):
         """Send DNS query using raw DNS packets"""
         try:
             # Create DNS query message
             query_msg = dns.message.make_query(qname, qtype, dns.rdataclass.IN)
 
-            # Apply TSIG if enabled
-            query_msg = tsig_client.sign_query(query_msg)
-
             # Log the query details
             self.file_logger.debug(
-                f"DNS_QUERY - {qname} {qtype} to {server}:{port}"
+                f"DNS_QUERY - {qname} {qtype} to {server}:{port} (TCP: {use_tcp})"
             )
 
             start_time = time.time()
@@ -43,15 +38,6 @@ class DNSQueryHandler:
                     )
 
                 elapsed = time.time() - start_time
-
-                # Verify TSIG if enabled
-                if not tsig_client.verify_response(response):
-                    return {
-                        "success": False,
-                        "elapsed": elapsed,
-                        "error": "TSIG_VERIFICATION_FAILED",
-                        "output": "TSIG signature verification failed",
-                    }
 
                 # Parse response
                 rcode = dns.rcode.to_text(response.rcode())
@@ -103,7 +89,7 @@ class DNSQueryHandler:
                 "output": str(e),
             }
 
-    def test_connectivity(self, server, port, tsig_client):
+    def test_connectivity(self, server, port):
         """Test basic connectivity using raw DNS packets"""
         try:
             from logger import console
@@ -115,9 +101,7 @@ class DNSQueryHandler:
                 f"CONNECTIVITY_TEST - Testing connection to {server}:{port}"
             )
 
-            result = self.send_query(
-                server, port, "google.com.", "A", tsig_client, timeout=5
-            )
+            result = self.send_query(server, port, "google.com.", "A", timeout=5)
 
             if result["success"]:
                 console.print(
