@@ -9,7 +9,7 @@ console = Console()
 class ClientLogger:
     """Centralized logging setup for DNS client"""
 
-    def __init__(self, log_file="client.log"):
+    def __init__(self, log_file="./client.log"):
         self.log_file = log_file
         self.file_logger = None
         self.console_logger = None

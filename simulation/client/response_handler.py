@@ -75,15 +75,16 @@ class DisplayHandler:
             f"{answers_count} answer{'s' if answers_count != 1 else ''}{' : ' if answers_count > 0 else ''}",
             style="white",
         )
-        text.append(f"{output.strip().replace('\n', ' ')} ", style="bold green")
+        text.append(f"{output.strip().replace(chr(10), ' ')} ", style="bold green")
         text.append(f"({elapsed:.3f}s)", style="dim")
 
         console.print(text)
 
         # Log response content if available
         if output and output.strip():
+            cleaned_output = output.strip().replace("\n", " ")
             self.file_logger.info(
-                f"RESPONSE_CONTENT - {qname} {qtype}: {output.strip().replace('\n',' ')}"
+                f"RESPONSE_CONTENT - {qname} {qtype}: {cleaned_output}"
             )
 
         # Log error details if it's a failure
