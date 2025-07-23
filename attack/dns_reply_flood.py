@@ -5,7 +5,7 @@ import struct
 import random
 import time
 import threading
-import string
+import logging
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 if current_dir not in sys.path:
@@ -352,16 +352,21 @@ class DNSReplyFlood(AttackStrategy):
         self._display_attack_completion(start_time)
 
 if __name__ == "__main__":
-    import logging
     logging.basicConfig(
-        level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+        level=logging.INFO,
+        format="%(asctime)s - %(levelname)s - %(message)s",
+        handlers=[logging.StreamHandler()]
     )
-    # Example usage:
-    server_ip = "127.0.0.1"  # DNS server IP
+
+    server_ip = "127.0.0.1"        # DNS server IP
     server_port = 53
-    target_ip = "192.168.1.100"  # Spoofed victim IP
+    target_ip = "192.168.1.100"    # Spoofed victim IP
     target_port = 12345
+
     attack = DNSReplyFlood(
-        server_ip, server_port, target_ip, target_port, duration=10, threads=5
+        server_ip, server_port,
+        target_ip, target_port,
+        duration=10, threads=5
     )
     attack.attack()
+
