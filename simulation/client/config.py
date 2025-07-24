@@ -12,6 +12,7 @@ class ClientConfig:
         self.interval = 1.0
         self.timeout = 5.0
         self.use_tcp = False
+        self.log = './client.log'
 
     @classmethod
     def from_args(cls):
@@ -34,6 +35,9 @@ class ClientConfig:
         parser.add_argument(
             "--use-tcp", action="store_true", help="Use TCP instead of UDP"
         )
+        parser.add_argument(
+            "--log", type=str, default="./client.log", help="Log file path"
+        )
 
         args = parser.parse_args()
 
@@ -44,6 +48,7 @@ class ClientConfig:
         config.interval = args.interval
         config.timeout = args.timeout
         config.use_tcp = args.use_tcp
+        config.log = args.log
 
         return config
 

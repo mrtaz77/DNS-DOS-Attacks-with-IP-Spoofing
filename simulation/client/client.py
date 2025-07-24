@@ -44,7 +44,7 @@ class DNSClient:
         self.config.validate()
 
         # Setup logging
-        self.logger_setup = ClientLogger()
+        self.logger_setup = ClientLogger(log_file=self.config.log)
         self.file_logger = self.logger_setup.get_file_logger()
 
         # Initialize components
