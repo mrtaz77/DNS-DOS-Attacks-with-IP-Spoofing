@@ -69,7 +69,7 @@ class DisplayHandler:
         text.append(f"{qtype} ", style="yellow")
         text.append(f"[{rcode}] ", style="magenta")
         text.append(
-            f"{answers_count} answer{'s' if answers_count != 1 else ''}{' : ' if answers_count > 0 else ''}",
+            f"{answers_count} answer{'s' if answers_count != 1 else ''}{' : ' if answers_count > 0 else ' '}",
             style="white",
         )
         text.append(f"{output.strip().replace(chr(10), ' ')} ", style="bold green")
@@ -96,8 +96,3 @@ class DisplayHandler:
         console.print("\n[yellow]🛑 Client stopped[/yellow]")
         self.file_logger.info("SHUTDOWN - DNS Client stopped")
         self.metrics.log()
-
-        summary = self.metrics.get_summary()
-        self.file_logger.info(
-            f"FINAL_SUMMARY - Total requests: {summary['sent']}, Success: {summary['success']}, Failures: {summary['failure']}, Delayed: {summary['delayed']}"
-        )

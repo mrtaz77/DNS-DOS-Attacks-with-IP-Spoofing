@@ -56,21 +56,21 @@ class Metrics:
             self.success + self.delayed, 1
         )
 
-        # Create metrics table
-        table = Table(title="📊 DNS Client Metrics", box=box.ROUNDED)
+        # Create metrics table with appropriate colors for each metric
+        table = Table(title="📊 DNS Client Metrics", box=box.ROUNDED, border_style="bright_blue")
         table.add_column("Metric", style="cyan", no_wrap=True)
         table.add_column("Count", style="magenta")
         table.add_column("Percentage", style="green")
 
-        table.add_row("Requests Sent", str(self.sent), "100.00%")
-        table.add_row("Success", str(self.success), f"{self.success*100/total:.2f}%")
+        table.add_row("[bold white]Requests Sent[/]", f"[white]{self.sent}[/]", "[white]-[/]")
+        table.add_row("[bold green]Success[/]", f"[green]{self.success}[/]", f"[green]{self.success*100/total:.2f}%[/]")
         table.add_row(
-            "Failure (Timeouts)", str(self.failure), f"{self.failure*100/total:.2f}%"
+            "[bold red]Failure (Timeouts)[/]", f"[red]{self.failure}[/]", f"[red]{self.failure*100/total:.2f}%[/]"
         )
         table.add_row(
-            "Delayed (>1s)", str(self.delayed), f"{self.delayed*100/total:.2f}%"
+            "[bold yellow]Delayed (>1s)[/]", f"[yellow]{self.delayed}[/]", f"[yellow]{self.delayed*100/total:.2f}%[/]"
         )
-        table.add_row("Avg Response Time", f"{avg_response_time:.3f}s", "-")
+        table.add_row("[bold blue]Avg Response Time[/]", f"[blue]{avg_response_time:.3f}s[/]", "-")
 
         console.print(table)
 
@@ -78,21 +78,3 @@ class Metrics:
         self.file_logger.info(
             f"METRICS - Sent: {self.sent}, Success: {self.success} ({self.success*100/total:.2f}%), Failure: {self.failure} ({self.failure*100/total:.2f}%), Delayed: {self.delayed} ({self.delayed*100/total:.2f}%), Avg Time: {avg_response_time:.3f}s"
         )
-
-    def get_summary(self):
-        """Get metrics summary as dictionary"""
-        total = self.sent if self.sent else 1
-        avg_response_time = self.total_response_time / max(
-            self.success + self.delayed, 1
-        )
-
-        return {
-            "sent": self.sent,
-            "success": self.success,
-            "failure": self.failure,
-            "delayed": self.delayed,
-            "success_rate": self.success * 100 / total,
-            "failure_rate": self.failure * 100 / total,
-            "delayed_rate": self.delayed * 100 / total,
-            "avg_response_time": avg_response_time,
-        }
