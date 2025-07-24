@@ -54,9 +54,28 @@ pip install colorama dnspython
 
 ## Usage
 
-### Normal Client Simulation
+### Loopback aliases
+```sh
+# Add private IPs to loopback interface
+sudo ip addr add 192.168.100.10/32 dev lo
+sudo ip addr add 192.168.100.20/32 dev lo
+
+# Verify they're added
+ip addr show lo
+
+# Test connectivity
+ping 192.168.100.10
+ping 192.168.100.20
 ```
-python simulation/client/client.py --server <ip> --port <port> --zone <zone file>
+
+### Normal Client Simulation
+```py
+python simulation/client/client.py --server-ip <server_ip> --server-port <server_port> --zone <zone_file> --addr <client_ip> --log <client_log_file>
+```
+
+### DNS Reply Flood Attack
+```bash
+sudo python -m simulation.attacker.attack --server-ip <server_ip> --server-port <server_port> --target-ip <target_ip> --duration <duration> --threads <num_threads> --log-file <log_file>
 ```
 
 ### Direct Attack Execution

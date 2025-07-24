@@ -14,7 +14,7 @@ class DisplayHandler:
     def log_startup_info(self, config):
         """Log startup information and display banner."""
         self.file_logger.info(
-            f"STARTUP - DNS Client starting with server: {config.server}:{config.port}"
+            f"STARTUP - DNS Client starting with server: {config.server_ip}:{config.server_port}"
         )
         self.file_logger.info(
             f"STARTUP - Configuration: Zone={config.zone}, Interval={config.interval}s, Timeout={config.timeout}s"
@@ -23,7 +23,7 @@ class DisplayHandler:
         console.print(
             Panel.fit(
                 "[bold blue]🌐 DNS Client Starting[/bold blue]\n"
-                f"Server: {config.server}:{config.port}\n"
+                f"Server: {config.server_ip}:{config.server_port}\n"
                 f"Zone: {config.zone or 'None'}\n"
                 f"Interval: {config.interval}s\n"
                 f"Protocol: {config.protocol}\n"
@@ -69,7 +69,7 @@ class DisplayHandler:
         text.append(f"{qtype} ", style="yellow")
         text.append(f"[{rcode}] ", style="magenta")
         text.append(
-            f"{answers_count} answer{'s' if answers_count != 1 else ''}{' : ' if answers_count > 0 else ''}",
+            f"{answers_count} answer{'s' if answers_count != 1 else ''}{' : ' if answers_count > 0 else ' '}",
             style="white",
         )
         text.append(f"{output.strip().replace(chr(10), ' ')} ", style="bold green")
@@ -96,8 +96,3 @@ class DisplayHandler:
         console.print("\n[yellow]🛑 Client stopped[/yellow]")
         self.file_logger.info("SHUTDOWN - DNS Client stopped")
         self.metrics.log()
-
-        summary = self.metrics.get_summary()
-        self.file_logger.info(
-            f"FINAL_SUMMARY - Total requests: {summary['sent']}, Success: {summary['success']}, Failures: {summary['failure']}, Delayed: {summary['delayed']}"
-        )

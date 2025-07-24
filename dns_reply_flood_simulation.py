@@ -14,6 +14,7 @@ import argparse
 
 LOGGING_DIR = "dns-reply-flood"
 
+
 class DNSReplyFloodSimulation:
     def __init__(
         self,
@@ -128,7 +129,9 @@ class DNSReplyFloodSimulation:
             log_file.write("Role: Normal user (whose IP is spoofed by attacker)\n")
             log_file.write("=" * 60 + "\n")
             while not self.stop_event.is_set():
-                query_name = self.legitimate_domains[request_count % len(self.legitimate_domains)]
+                query_name = self.legitimate_domains[
+                    request_count % len(self.legitimate_domains)
+                ]
                 elapsed = time.time() - phase_start_time
                 phase = self._determine_phase(elapsed).lower()
                 try:
@@ -137,25 +140,29 @@ class DNSReplyFloodSimulation:
                     log_file.write(log_entry)
                     log_file.flush()
                     self.metrics[phase].append(response_time)
-                    self.metrics["client_requests"].append({
-                        "timestamp": time.time(),
-                        "query": query_name,
-                        "response_time_ms": response_time,
-                        "status": "SUCCESS",
-                        "phase": phase,
-                    })
+                    self.metrics["client_requests"].append(
+                        {
+                            "timestamp": time.time(),
+                            "query": query_name,
+                            "response_time_ms": response_time,
+                            "status": "SUCCESS",
+                            "phase": phase,
+                        }
+                    )
                 except Exception as e:
                     log_entry = f"[{datetime.now()}] [{phase}] Query {request_count}: {query_name} FAILED - {e}\n"
                     log_file.write(log_entry)
                     log_file.flush()
-                    self.metrics["client_requests"].append({
-                        "timestamp": time.time(),
-                        "query": query_name,
-                        "response_time_ms": 0,
-                        "status": "FAILED",
-                        "phase": phase,
-                        "error": str(e),
-                    })
+                    self.metrics["client_requests"].append(
+                        {
+                            "timestamp": time.time(),
+                            "query": query_name,
+                            "response_time_ms": 0,
+                            "status": "FAILED",
+                            "phase": phase,
+                            "error": str(e),
+                        }
+                    )
                 request_count += 1
                 time.sleep(2)
 
@@ -167,6 +174,7 @@ class DNSReplyFloodSimulation:
         try:
             sys.path.append(".")
             from attack.dns_reply_flood import DNSReplyFlood
+
             attack = DNSReplyFlood(
                 server_ip=self.server_ip,
                 server_port=self.server_port,
@@ -182,14 +190,20 @@ class DNSReplyFloodSimulation:
                 log_file.write(f"Spoofed IP: {self.spoofed_client_ip}\n")
                 log_file.write(f"Duration: {self.attack_duration} seconds\n")
                 log_file.write(f"Threads: {self.attack_threads}\n")
-                log_file.write("Attack Mechanism: Spoofed IP, high volume of legitimate queries\n")
+                log_file.write(
+                    "Attack Mechanism: Spoofed IP, high volume of legitimate queries\n"
+                )
                 log_file.write("=" * 60 + "\n")
             attack_start = time.time()
             attack.attack()
             attack_end = time.time()
             with open(f"{LOGGING_DIR}/attack.log", "a") as log_file:
-                log_file.write(f"\nDNS Reply Flood attack completed at {datetime.now()}\n")
-                log_file.write(f"Actual duration: {attack_end - attack_start:.2f} seconds\n")
+                log_file.write(
+                    f"\nDNS Reply Flood attack completed at {datetime.now()}\n"
+                )
+                log_file.write(
+                    f"Actual duration: {attack_end - attack_start:.2f} seconds\n"
+                )
                 log_file.write(f"DNS queries sent: {attack.packets_sent}\n")
             self.metrics["attack_stats"] = {
                 "attack_type": "dns-reply-flood",
@@ -202,18 +216,81 @@ class DNSReplyFloodSimulation:
                 "dns_queries_sent": attack.packets_sent,
             }
             self.results_queue.put(("attack_completed", self.metrics["attack_stats"]))
-            logging.warning(f"[{thread_name}] DNS Reply Flood attack completed after {attack_end - attack_start:.2f} seconds")
-            logging.warning(f"[{thread_name}] Attack generated {attack.packets_sent} queries")
+            logging.warning(
+                f"[{thread_name}] DNS Reply Flood attack completed after {attack_end - attack_start:.2f} seconds"
+            )
+            logging.warning(
+                f"[{thread_name}] Attack generated {attack.packets_sent} queries"
+            )
         except Exception as e:
             logging.error(f"[{thread_name}] DNS Reply Flood attack failed: {e}")
             self.results_queue.put(("attack_error", str(e)))
+
+    def _dos_monitor_send_query(self, test_domain):
+        start_time = time.time()
+        query = dns.message.make_query(test_domain, "A")
+        try:
+            response = dns.query.udp(
+                query, self.server_ip, port=self.server_port, timeout=5
+            )
+            end_time = time.time()
+            response_time = (end_time - start_time) * 1000
+            if response.rcode() == 0:
+                status = "SUCCESS"
+            elif response.rcode() == 3:
+                status = "NXDOMAIN"
+            else:
+                status = f"RCODE_{response.rcode()}"
+        except Exception as e:
+            end_time = time.time()
+            response_time = (end_time - start_time) * 1000
+            status = f"FAILED: {str(e)}"
+        return response_time, status, start_time, end_time
+
+    def _dos_monitor_determine_phase(self, elapsed):
+        if elapsed < 15:
+            return "baseline"
+        elif elapsed < (15 + self.attack_duration):
+            return "during_attack"
+        else:
+            return "post_attack"
+
+    def _dos_monitor_log_and_metrics(
+        self, log_file, phase, test_domain, response_time, status
+    ):
+        log_entry = f"[{datetime.now()}] Phase: {phase:12} | Domain: {test_domain:25} | Response: {response_time:7.2f}ms | Status: {status}\n"
+        log_file.write(log_entry)
+        log_file.flush()
+        self.metrics[phase].append(response_time)
+        self.metrics["dos_monitor"].append(
+            {
+                "timestamp": time.time(),
+                "phase": phase,
+                "domain": test_domain,
+                "response_time_ms": response_time,
+                "status": status,
+            }
+        )
+
+    def _dos_monitor_dos_detection(self, thread_name):
+        recent = self.metrics["dos_monitor"][-5:]
+        if len(recent) == 5:
+            avg_recent = mean([r["response_time_ms"] for r in recent])
+            failures = sum(
+                1
+                for r in recent
+                if "FAILED" in r["status"] or "timeout" in r["status"].lower()
+            )
+            if avg_recent > 1000 or failures >= 2:
+                logging.warning(
+                    f"[{thread_name}] 🚨 DoS detected: avg={avg_recent:.2f}ms, failures={failures}/5"
+                )
 
     def dos_monitoring_thread(self):
         thread_name = "DoS-Monitor"
         logging.info(f"[{thread_name}] Starting DoS impact monitoring")
         time.sleep(5)
-        phase = "baseline"
-        self.metrics['dos_monitor'] = []
+        self.metrics["dos_monitor"] = []
         legit_domain = "www.example.com"
         nonexist_domain = "nonexistent12345.example.com"
         query_toggle = True
@@ -223,52 +300,17 @@ class DNSReplyFloodSimulation:
             log_file.write("=" * 60 + "\n")
             while not self.stop_event.is_set():
                 try:
-                    # Alternate between legitimate and non-existent domain
                     test_domain = legit_domain if query_toggle else nonexist_domain
                     query_toggle = not query_toggle
-                    start_time = time.time()
-                    query = dns.message.make_query(test_domain, "A")
-                    try:
-                        response = dns.query.udp(query, self.server_ip, port=self.server_port, timeout=5)
-                        end_time = time.time()
-                        response_time = (end_time - start_time) * 1000
-                        if response.rcode() == 0:
-                            status = "SUCCESS"
-                        elif response.rcode() == 3:
-                            status = "NXDOMAIN"
-                        else:
-                            status = f"RCODE_{response.rcode()}"
-                    except Exception as e:
-                        end_time = time.time()
-                        response_time = (end_time - start_time) * 1000
-                        status = f"FAILED: {str(e)}"
-                    elapsed = end_time - start_time
-                    if elapsed < 15:
-                        phase = "baseline"
-                    elif elapsed < (15 + self.attack_duration):
-                        phase = "during_attack"
-                    else:
-                        phase = "post_attack"
-                    log_entry = (
-                        f"[{datetime.now()}] Phase: {phase:12} | Domain: {test_domain:25} | Response: {response_time:7.2f}ms | Status: {status}\n"
+                    response_time, status, start_time, end_time = (
+                        self._dos_monitor_send_query(test_domain)
                     )
-                    log_file.write(log_entry)
-                    log_file.flush()
-                    self.metrics[phase].append(response_time)
-                    self.metrics['dos_monitor'].append({
-                        'timestamp': time.time(),
-                        'phase': phase,
-                        'domain': test_domain,
-                        'response_time_ms': response_time,
-                        'status': status,
-                    })
-                    # DoS detection logic (last 5 queries)
-                    recent = self.metrics['dos_monitor'][-5:]
-                    if len(recent) == 5:
-                        avg_recent = mean([r['response_time_ms'] for r in recent])
-                        failures = sum(1 for r in recent if 'FAILED' in r['status'] or 'timeout' in r['status'].lower())
-                        if avg_recent > 1000 or failures >= 2:
-                            logging.warning(f"[{thread_name}] 🚨 DoS detected: avg={avg_recent:.2f}ms, failures={failures}/5")
+                    elapsed = end_time - start_time
+                    phase = self._dos_monitor_determine_phase(elapsed)
+                    self._dos_monitor_log_and_metrics(
+                        log_file, phase, test_domain, response_time, status
+                    )
+                    self._dos_monitor_dos_detection(thread_name)
                     time.sleep(2)
                 except Exception as e:
                     logging.error(f"[{thread_name}] Monitoring error: {e}")
@@ -301,10 +343,16 @@ class DNSReplyFloodSimulation:
         print("=" * 70)
         try:
             threads = [
-                threading.Thread(target=self.start_dns_server_thread, name="Thread-1-DNS-Server"),
+                threading.Thread(
+                    target=self.start_dns_server_thread, name="Thread-1-DNS-Server"
+                ),
                 threading.Thread(target=self.client_thread, name="Thread-2-Client"),
-                threading.Thread(target=self.dns_reply_flood_attack_thread, name="Thread-3-Attack"),
-                threading.Thread(target=self.dos_monitoring_thread, name="Thread-4-DoS-Monitor"),
+                threading.Thread(
+                    target=self.dns_reply_flood_attack_thread, name="Thread-3-Attack"
+                ),
+                threading.Thread(
+                    target=self.dos_monitoring_thread, name="Thread-4-DoS-Monitor"
+                ),
             ]
             for i, thread in enumerate(threads):
                 thread.start()
@@ -354,22 +402,114 @@ class DNSReplyFloodSimulation:
             print(f"Spoofed IP: {stats.get('spoofed_ip', 'Unknown')}")
         # Phase-wise response times and degradation
         for phase in ["baseline", "during_attack", "post_attack"]:
-            phase_times = [r["response_time_ms"] for r in self.metrics["client_requests"] if r["phase"].lower() == phase and r["status"] == "SUCCESS"]
+            phase_times = [
+                r["response_time_ms"]
+                for r in self.metrics["client_requests"]
+                if r["phase"].lower() == phase and r["status"] == "SUCCESS"
+            ]
             if phase_times:
                 avg = mean(phase_times)
                 degraded = [t for t in phase_times if t > 1000]
-                degradation_percent = (len(degraded) / len(phase_times) * 100) if phase_times else 0
-                print(f"{phase.title()} Avg Response Time: {avg:.2f} ms | Service Degradation (>1s): {degradation_percent:.2f}%")
+                degradation_percent = (
+                    (len(degraded) / len(phase_times) * 100) if phase_times else 0
+                )
+                print(
+                    f"{phase.title()} Avg Response Time: {avg:.2f} ms | Service Degradation (>1s): {degradation_percent:.2f}%"
+                )
             else:
-                print(f"{phase.title()} Avg Response Time: N/A | Service Degradation (>1s): N/A")
+                print(
+                    f"{phase.title()} Avg Response Time: N/A | Service Degradation (>1s): N/A"
+                )
         # Compute client metrics
-        client_success = sum(1 for r in self.metrics["client_requests"] if r["status"] == "SUCCESS")
-        client_fail = sum(1 for r in self.metrics["client_requests"] if r["status"] == "FAILED")
+        client_success = sum(
+            1 for r in self.metrics["client_requests"] if r["status"] == "SUCCESS"
+        )
+        client_fail = sum(
+            1 for r in self.metrics["client_requests"] if r["status"] == "FAILED"
+        )
         total_client = client_success + client_fail
         success_rate = (client_success / total_client * 100) if total_client > 0 else 0
         print(f"Client Success: {client_success}, Client Failures: {client_fail}")
         print(f"Client Success Rate: {success_rate:.2f}%")
         print("=== END OF REPORT ===\n")
+
+
+def setup_signal_handler(simulation, threads):
+    def signal_handler(sig, frame):
+        logging.info("Received interrupt signal")
+        simulation.stop_event.set()
+        for thread in threads:
+            if thread.is_alive():
+                thread.join(timeout=10)
+        simulation.cleanup()
+        sys.exit(0)
+
+    signal.signal(signal.SIGINT, signal_handler)
+
+
+def start_simulation_threads(simulation):
+    threads = [
+        threading.Thread(
+            target=simulation.start_dns_server_thread, name="Thread-1-DNS-Server"
+        ),
+        threading.Thread(target=simulation.client_thread, name="Thread-2-Client"),
+        threading.Thread(
+            target=simulation.dns_reply_flood_attack_thread, name="Thread-3-Attack"
+        ),
+        threading.Thread(
+            target=simulation.dos_monitoring_thread, name="Thread-4-DoS-Monitor"
+        ),
+    ]
+    for i, thread in enumerate(threads):
+        thread.start()
+        logging.info(f"Started {thread.name}")
+        time.sleep(2)
+    return threads
+
+
+def _join_threads(threads, skip_index=None):
+    for i, thread in enumerate(threads):
+        if skip_index is not None and i == skip_index:
+            continue
+        thread.join(timeout=10)
+        if thread.is_alive():
+            logging.warning(f"{thread.name} did not stop gracefully")
+        else:
+            logging.info(f"{thread.name} stopped successfully")
+
+def _handle_cleanup(simulation, threads):
+    simulation.stop_event.set()
+    _join_threads(threads)
+    simulation.cleanup()
+
+def run_simulation_and_report(simulation, threads):
+    try:
+        print("\n📍 SIMULATION PHASES:")
+        print("Phase 1: Baseline measurement (15 seconds)")
+        print(f"Phase 2: DNS Reply Flood Attack ({simulation.attack_duration} seconds)")
+        print("Phase 3: Post-attack (15 seconds)")
+        print("=" * 70)
+        threads[2].join()
+        print("\n🔥 DNS ATTACK PHASE COMPLETED")
+        print("🔍 Continuing post-attack monitoring and recovery assessment...")
+        post_attack_duration = 15
+        for remaining in range(post_attack_duration, 0, -5):
+            print(f"⏱️  Post-attack monitoring: {remaining}s remaining...")
+            time.sleep(5)
+        print("✅ Post-attack monitoring completed")
+        simulation.stop_event.set()
+        _join_threads(threads, skip_index=2)
+        print("\n📊 Generating summary report...")
+        simulation.generate_report()
+    except KeyboardInterrupt:
+        logging.warning("Simulation interrupted by user")
+        _handle_cleanup(simulation, threads)
+    except Exception as e:
+        logging.error(f"Simulation failed: {e}")
+        _handle_cleanup(simulation, threads)
+    finally:
+        simulation.cleanup()
+
 
 def main():
     parser = argparse.ArgumentParser(
@@ -393,12 +533,44 @@ Examples:
   sudo python dns_reply_flood_simulation.py --duration 30 --threads 10
         """,
     )
-    parser.add_argument("--duration", "-d", type=int, default=30, help="Attack duration in seconds (default: 30)")
-    parser.add_argument("--threads", "-t", type=int, default=10, help="Number of attack threads (default: 10)")
-    parser.add_argument("--server-port", type=int, default=5353, help="Target DNS server port (default: 5353)")
-    parser.add_argument("--server-ip", type=str, default="127.0.0.1", help="DNS server IP address (default: 127.0.0.1)")
-    parser.add_argument("--spoofed-client-ip", type=str, default="192.168.1.200", help="Client IP to spoof (default: 192.168.1.200)")
-    parser.add_argument("--spoofed-client-port", type=int, default=12345, help="Client port to spoof (default: 12345)")
+    parser.add_argument(
+        "--duration",
+        "-d",
+        type=int,
+        default=30,
+        help="Attack duration in seconds (default: 30)",
+    )
+    parser.add_argument(
+        "--threads",
+        "-t",
+        type=int,
+        default=10,
+        help="Number of attack threads (default: 10)",
+    )
+    parser.add_argument(
+        "--server-port",
+        type=int,
+        default=5353,
+        help="Target DNS server port (default: 5353)",
+    )
+    parser.add_argument(
+        "--server-ip",
+        type=str,
+        default="127.0.0.1",
+        help="DNS server IP address (default: 127.0.0.1)",
+    )
+    parser.add_argument(
+        "--spoofed-client-ip",
+        type=str,
+        default="192.168.1.200",
+        help="Client IP to spoof (default: 192.168.1.200)",
+    )
+    parser.add_argument(
+        "--spoofed-client-port",
+        type=int,
+        default=12345,
+        help="Client port to spoof (default: 12345)",
+    )
     args = parser.parse_args()
     simulation = DNSReplyFloodSimulation(
         attack_duration=args.duration,
@@ -408,13 +580,11 @@ Examples:
         spoofed_client_ip=args.spoofed_client_ip,
         spoofed_client_port=args.spoofed_client_port,
     )
-    def signal_handler(sig, frame):
-        logging.info("Received interrupt signal")
-        simulation.stop_event.set()
-        simulation.cleanup()
-        sys.exit(0)
-    signal.signal(signal.SIGINT, signal_handler)
-    simulation.run_simulation()
+
+    threads = start_simulation_threads(simulation)
+    setup_signal_handler(simulation, threads)
+    run_simulation_and_report(simulation, threads)
+
 
 if __name__ == "__main__":
     main()

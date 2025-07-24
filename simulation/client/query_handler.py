@@ -9,8 +9,9 @@ import dns.exception
 class DNSQueryHandler:
     """DNS query execution and response handling"""
 
-    def __init__(self, file_logger):
+    def __init__(self, file_logger, bind_ip=None):
         self.file_logger = file_logger
+        self.bind_ip = bind_ip
 
     def send_query(self, server, port, qname, qtype, timeout=10, use_tcp=False):
         """Send DNS query using raw DNS packets"""
@@ -29,12 +30,20 @@ class DNSQueryHandler:
                 if use_tcp:
                     # Use TCP for the query
                     response = dns.query.tcp(
-                        query_msg, server, port=port, timeout=timeout
+                        query_msg,
+                        server,
+                        port=port,
+                        timeout=timeout,
+                        source=self.bind_ip if self.bind_ip else None,
                     )
                 else:
                     # Use UDP for the query
                     response = dns.query.udp(
-                        query_msg, server, port=port, timeout=timeout
+                        query_msg,
+                        server,
+                        port=port,
+                        timeout=timeout,
+                        source=self.bind_ip if self.bind_ip else None,
                     )
 
                 elapsed = time.time() - start_time

@@ -6,12 +6,14 @@ class ClientConfig:
     """Configuration handler for DNS client"""
 
     def __init__(self):
-        self.server = None
-        self.port = 53
+        self.server_ip = None
+        self.server_port = 53
         self.zone = None
         self.interval = 1.0
         self.timeout = 5.0
         self.use_tcp = False
+        self.log = "./client.log"
+        self.addr = None
 
     @classmethod
     def from_args(cls):
@@ -19,8 +21,10 @@ class ClientConfig:
         parser = argparse.ArgumentParser(
             description="🌐 DNS Client using raw DNS packets"
         )
-        parser.add_argument("--server", required=True, help="DNS server IP")
-        parser.add_argument("--port", type=int, default=53, help="DNS server port")
+        parser.add_argument("--server-ip", required=True, help="DNS server IP")
+        parser.add_argument(
+            "--server-port", type=int, default=53, help="DNS server port"
+        )
         parser.add_argument("--zone", help="Path to zone file (optional)")
         parser.add_argument(
             "--interval",
@@ -34,25 +38,42 @@ class ClientConfig:
         parser.add_argument(
             "--use-tcp", action="store_true", help="Use TCP instead of UDP"
         )
+        parser.add_argument(
+            "--log", type=str, default="./client.log", help="Log file path"
+        )
+        parser.add_argument(
+            "--addr",
+            type=str,
+            default=None,
+            help="Source IP to bind for outgoing DNS requests",
+        )
 
         args = parser.parse_args()
 
         config = cls()
-        config.server = args.server
-        config.port = args.port
+        config.server_ip = args.server_ip
+        config.server_port = args.server_port
         config.zone = args.zone
         config.interval = args.interval
         config.timeout = args.timeout
         config.use_tcp = args.use_tcp
+        config.log = args.log
+        config.addr = args.addr
+
+        # Ensure log file directory exists
+        log_path = Path(config.log)
+        if log_path.parent and not log_path.parent.exists():
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+        config.log = str(log_path)
 
         return config
 
     def validate(self):
         """Validate configuration"""
-        if not self.server:
+        if not self.server_ip:
             raise ValueError("Server is required")
 
-        if self.port < 1 or self.port > 65535:
+        if self.server_port < 1 or self.server_port > 65535:
             raise ValueError("Port must be between 1 and 65535")
 
         if self.interval <= 0:

