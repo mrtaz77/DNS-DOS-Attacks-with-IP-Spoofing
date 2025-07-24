@@ -14,7 +14,7 @@ class DisplayHandler:
     def log_startup_info(self, config):
         """Log startup information and display banner."""
         self.file_logger.info(
-            f"STARTUP - DNS Client starting with server: {config.server}:{config.port}"
+            f"STARTUP - DNS Client starting with server: {config.server_ip}:{config.server_port}"
         )
         self.file_logger.info(
             f"STARTUP - Configuration: Zone={config.zone}, Interval={config.interval}s, Timeout={config.timeout}s"
@@ -23,7 +23,7 @@ class DisplayHandler:
         console.print(
             Panel.fit(
                 "[bold blue]🌐 DNS Client Starting[/bold blue]\n"
-                f"Server: {config.server}:{config.port}\n"
+                f"Server: {config.server_ip}:{config.server_port}\n"
                 f"Zone: {config.zone or 'None'}\n"
                 f"Interval: {config.interval}s\n"
                 f"Protocol: {config.protocol}\n"
