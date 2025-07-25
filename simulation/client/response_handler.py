@@ -73,7 +73,7 @@ class DisplayHandler:
             style="white",
         )
         text.append(f"{output.strip().replace(chr(10), ' ')} ", style="bold green")
-        text.append(f"({elapsed:.3f}s)", style="dim")
+        text.append(f"({(elapsed * 1000):.3f}ms)", style="dim")
 
         console.print(text)
 

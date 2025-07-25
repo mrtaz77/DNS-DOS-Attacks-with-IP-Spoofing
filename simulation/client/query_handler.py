@@ -22,7 +22,7 @@ class DNSQueryHandler:
 
             # Log the query details
             self.file_logger.debug(
-                f"DNS_QUERY - {qname} {qtype} to {server_ip}:{server_port} (TCP: {use_tcp})"
+                f"DNS_QUERY - {qname} {qtype} to {server_ip}:{server_port}"
             )
 
             start_time = time.time()
@@ -58,7 +58,7 @@ class DNSQueryHandler:
                 output = "\n".join(output_lines) if output_lines else ""
 
                 self.file_logger.debug(
-                    f"DNS_RESPONSE - {rcode}, {answers_count} answers, {elapsed:.3f}s"
+                    f"DNS_RESPONSE - {rcode}, {answers_count} answers, {(elapsed * 1000):.3f}ms"
                 )
 
                 return {

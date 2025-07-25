@@ -46,7 +46,7 @@ class Metrics:
 
         # Log to file
         self.file_logger.info(
-            f"RESPONSE [{response_data['id']:04d}] {qname} {qtype} [{rcode}] {answers_count} answers {elapsed:.3f}s [{status}]"
+            f"RESPONSE [{response_data['id']:04d}] {qname} {qtype} [{rcode}] {answers_count} answers {(elapsed * 1000):.3f}ms [{status}]"
         )
 
     def log(self):
@@ -62,19 +62,33 @@ class Metrics:
         table.add_column("Count", style="magenta")
         table.add_column("Percentage", style="green")
 
-        table.add_row("[bold white]Requests Sent[/]", f"[white]{self.sent}[/]", "[white]-[/]")
-        table.add_row("[bold green]Success[/]", f"[green]{self.success}[/]", f"[green]{self.success*100/total:.2f}%[/]")
         table.add_row(
-            "[bold red]Failure (Timeouts)[/]", f"[red]{self.failure}[/]", f"[red]{self.failure*100/total:.2f}%[/]"
+            "[bold white]Requests Sent[/]", f"[white]{self.sent}[/]", "[white]-[/]"
         )
         table.add_row(
-            "[bold yellow]Delayed (>1s)[/]", f"[yellow]{self.delayed}[/]", f"[yellow]{self.delayed*100/total:.2f}%[/]"
+            "[bold green]Success[/]",
+            f"[green]{self.success}[/]",
+            f"[green]{self.success*100/total:.2f}%[/]",
         )
-        table.add_row("[bold blue]Avg Response Time[/]", f"[blue]{avg_response_time:.3f}s[/]", "-")
+        table.add_row(
+            "[bold red]Failure (Timeouts)[/]",
+            f"[red]{self.failure}[/]",
+            f"[red]{self.failure*100/total:.2f}%[/]",
+        )
+        table.add_row(
+            "[bold yellow]Delayed (>1s)[/]",
+            f"[yellow]{self.delayed}[/]",
+            f"[yellow]{self.delayed*100/total:.2f}%[/]",
+        )
+        table.add_row(
+            "[bold blue]Avg Response Time[/]",
+            f"[blue]{(avg_response_time * 1000):.3f}ms[/]",
+            "-",
+        )
 
-        console.print(table)
+        console.print(table)  # Print summary table to console
 
         # Log metrics to file
         self.file_logger.info(
-            f"METRICS - Sent: {self.sent}, Success: {self.success} ({self.success*100/total:.2f}%), Failure: {self.failure} ({self.failure*100/total:.2f}%), Delayed: {self.delayed} ({self.delayed*100/total:.2f}%), Avg Time: {avg_response_time:.3f}s"
+            f"METRICS - Sent: {self.sent}, Success: {self.success} ({self.success*100/total:.2f}%), Failure: {self.failure} ({self.failure*100/total:.2f}%), Delayed: {self.delayed} ({self.delayed*100/total:.2f}%), Avg Time: {(avg_response_time * 1000):.3f}ms"
         )

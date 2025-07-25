@@ -20,6 +20,11 @@ class ClientLogger:
         # Create file logger
         self.file_logger = logging.getLogger("CLIENT")
         self.file_logger.setLevel(logging.DEBUG)
+        self.file_logger.propagate = False  # Prevent propagation to root logger
+
+        # Remove any existing handlers
+        if self.file_logger.hasHandlers():
+            self.file_logger.handlers.clear()
 
         # Create file handler
         file_handler = logging.FileHandler(self.log_file, mode="w")
@@ -29,7 +34,7 @@ class ClientLogger:
         file_handler.setFormatter(file_formatter)
         self.file_logger.addHandler(file_handler)
 
-        # Setup console logging with Rich
+        # Setup console logging with Rich (root logger)
         logging.basicConfig(
             level=logging.INFO,
             format="%(message)s",
@@ -39,7 +44,7 @@ class ClientLogger:
             ],
         )
 
-        self.console_logger = logging.getLogger("CLIENT")
+        self.console_logger = logging.getLogger("CLIENT_CONSOLE")
 
     def get_file_logger(self):
         """Get file logger instance"""
