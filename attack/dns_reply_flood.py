@@ -357,9 +357,7 @@ class DNSReplyFlood(AttackStrategy):
                     qtype = 255  # ANY
                 else:
                     qtype = random.choice(self.query_types)
-                spoofed_port = (
-                    self.spoofed_port
-                )
+                spoofed_port = self.spoofed_port
                 self._send_dns_query(self.spoofed_ip, spoofed_port, domain, qtype)
                 time.sleep(0.01)
             except Exception as e:
