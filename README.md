@@ -78,6 +78,38 @@ python simulation/client/client.py --server-ip <server_ip> --server-port <server
 sudo python -m simulation.attacker.attack --server-ip <server_ip> --server-port <server_port> --target-ip <target_ip> --duration <duration> --threads <num_threads> --log-file <log_file>
 ```
 
+### High-Performance DNS Server
+The project includes an improved DNS server implementation optimized for high-volume scenarios:
+
+```bash
+# Start high-performance DNS server
+python -m dns_server.main \
+  --port-udp 5353 \
+  --rate-limit-threshold 1000000 \
+  --max-workers 200 \
+  --queue-size 5000 \
+  --cache-type lru \
+  --cache-size 50000
+
+# Monitor server performance in real-time
+python dns_server_monitor.py --server-port 5353 --interval 1
+
+# Test server under high load
+python test_high_volume_dns.py --requests 100000 --workers 500 --server-port 5353
+
+# Run improvement demonstration
+python dns_improvement_demo.py
+```
+
+#### Server Performance Features
+- **Thread Pool Management**: Configurable worker threads (default: 50, max recommended: 200)
+- **Request Queue**: Bounded queue to prevent memory exhaustion (default: 1000)
+- **Advanced Rate Limiting**: Sliding window algorithm with memory-efficient cleanup
+- **High-Volume Optimizations**: Handles millions of requests without thread exhaustion
+- **Real-time Monitoring**: Built-in statistics and performance tracking
+sudo python -m simulation.attacker.attack --server-ip <server_ip> --server-port <server_port> --target-ip <target_ip> --duration <duration> --threads <num_threads> --log-file <log_file>
+```
+
 ### Direct Attack Execution
 ```bash
 # UDP Fragmented Flood
@@ -202,6 +234,47 @@ Both simulations create comprehensive logs in the `logs/` directory:
 - **target_port**: Target port number (default: 5353 for simulations)
 - **duration**: Attack duration in seconds
 - **threads**: Number of concurrent attack threads
+
+### DNS Server Performance Tuning
+
+#### For High-Volume Testing (Recommended Settings)
+```bash
+python -m dns_server.main \
+  --rate-limit-threshold 10000000 \
+  --max-workers 200 \
+  --queue-size 5000 \
+  --cache-type lru \
+  --cache-size 100000
+```
+
+#### For Production Environments
+```bash
+python -m dns_server.main \
+  --rate-limit-threshold 1000 \
+  --max-workers 50 \
+  --queue-size 1000 \
+  --cache-type hybrid \
+  --redis-url redis://localhost:6379/0
+```
+
+#### For Development/Testing
+```bash
+python -m dns_server.main \
+  --rate-limit-threshold 100 \
+  --max-workers 20 \
+  --queue-size 500
+```
+
+#### Performance Parameters
+- **max-workers**: Maximum worker threads (5-200, default: 50)
+  - Higher values handle more concurrent requests
+  - Too high may cause thread contention
+- **queue-size**: Request queue size (100-5000, default: 1000)  
+  - Larger queues handle traffic bursts better
+  - Too large may consume excessive memory
+- **rate-limit-threshold**: Requests per IP per time window
+  - Set high (1M+) for attack testing
+  - Set low (100-1000) for production protection
 
 ### UDP Fragment Specific
 - **min_packet_size**: Minimum fragmented packet size (default: 1500)
