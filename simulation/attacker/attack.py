@@ -45,7 +45,7 @@ def main():
     )
 
     def handle_sigint(signum, frame):
-        console.print("\n[red][!]🛑 Received interrupt. Stopping attack...[/red]")
+        console.print("\n[red]🛑 Received interrupt. Stopping attack...[/red]")
         attack.attack_active = False
         # Wait a moment for threads to finish
         time.sleep(0.5)
