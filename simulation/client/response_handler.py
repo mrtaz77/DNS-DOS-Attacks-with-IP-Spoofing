@@ -72,17 +72,17 @@ class DisplayHandler:
             f"{answers_count} answer{'s' if answers_count != 1 else ''}{' : ' if answers_count > 0 else ' '}",
             style="white",
         )
-        text.append(f"{output.strip().replace(chr(10), ' ')} ", style="bold green")
-        text.append(f"({elapsed:.3f}s)", style="dim")
+        # Output formatting based on status
+        output_text = output.strip().replace(chr(10), ' ')
+        if status == "SUCCESS":
+            text.append(f"{output_text} ", style="bold green")
+        elif status == "DELAYED":
+            text.append(f"{output_text} ", style="bold yellow")
+        else:
+            text.append(f"{output_text} ", style="bold red")
+        text.append(f"({(elapsed * 1000):.3f}ms)", style="dim")
 
         console.print(text)
-
-        # Log response content if available
-        if output and output.strip():
-            cleaned_output = output.strip().replace("\n", " ")
-            self.file_logger.info(
-                f"RESPONSE_CONTENT - {qname} {qtype}: {cleaned_output}"
-            )
 
         # Log error details if it's a failure
         if status == "FAILURE" and "error" in result:

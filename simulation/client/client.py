@@ -50,7 +50,11 @@ class DNSClient:
         # Initialize components
         self.metrics = Metrics(self.file_logger)
         self.zone_parser = ZoneParser(self.file_logger)
-        self.query_handler = DNSQueryHandler(self.file_logger, bind_ip=self.config.addr)
+        self.query_handler = DNSQueryHandler(
+            self.file_logger,
+            bind_ip=self.config.bind_ip,
+            bind_port=getattr(self.config, "port", None),
+        )
         self.display = DisplayHandler(self.metrics, self.file_logger)
 
     def setup_queries(self):

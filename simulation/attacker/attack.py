@@ -1,9 +1,14 @@
 import argparse
+import signal
+import sys
+import time
+from rich.console import Console
 
 from attack.dns_reply_flood import DNSReplyFlood
 
 
 def main():
+    console = Console()
     parser = argparse.ArgumentParser(
         description="DNS Reply Flood Attacker",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
@@ -38,7 +43,23 @@ def main():
         threads=args.threads,
         log_file=args.log_file,
     )
-    attack.attack()
+
+    def handle_sigint(signum, frame):
+        console.print("\n[red][!]🛑 Received interrupt. Stopping attack...[/red]")
+        attack.attack_active = False
+        # Wait a moment for threads to finish
+        time.sleep(0.5)
+        end_time = time.time()
+        attack._summarize_attack(attack.metrics.get("start_time", end_time), end_time)
+        attack.log_dns_request_stats()
+        sys.exit(0)
+
+    signal.signal(signal.SIGINT, handle_sigint)
+
+    try:
+        attack.attack()
+    except KeyboardInterrupt:
+        handle_sigint(None, None)
 
 
 if __name__ == "__main__":
