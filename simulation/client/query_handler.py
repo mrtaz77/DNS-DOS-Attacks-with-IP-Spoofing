@@ -9,11 +9,12 @@ import dns.exception
 class DNSQueryHandler:
     """DNS query execution and response handling"""
 
-    def __init__(self, file_logger, bind_ip=None):
+    def __init__(self, file_logger, bind_ip=None, bind_port=None):
         self.file_logger = file_logger
         self.bind_ip = bind_ip
+        self.bind_port = bind_port
 
-    def send_query(self, server, port, qname, qtype, timeout=10, use_tcp=False):
+    def send_query(self, server_ip, server_port, qname, qtype, timeout=10, use_tcp=False):
         """Send DNS query using raw DNS packets"""
         try:
             # Create DNS query message
@@ -21,29 +22,25 @@ class DNSQueryHandler:
 
             # Log the query details
             self.file_logger.debug(
-                f"DNS_QUERY - {qname} {qtype} to {server}:{port} (TCP: {use_tcp})"
+                f"DNS_QUERY - {qname} {qtype} to {server_ip}:{server_port} (TCP: {use_tcp})"
             )
 
             start_time = time.time()
-
             try:
+                source = None
+                if self.bind_ip and self.bind_port:
+                    source = (self.bind_ip, self.bind_port)
+                elif self.bind_ip:
+                    source = self.bind_ip
                 if use_tcp:
                     # Use TCP for the query
                     response = dns.query.tcp(
-                        query_msg,
-                        server,
-                        port=port,
-                        timeout=timeout,
-                        source=self.bind_ip if self.bind_ip else None,
+                        query_msg, server_ip, port=server_port, timeout=timeout, source=source
                     )
                 else:
                     # Use UDP for the query
                     response = dns.query.udp(
-                        query_msg,
-                        server,
-                        port=port,
-                        timeout=timeout,
-                        source=self.bind_ip if self.bind_ip else None,
+                        query_msg, server_ip, port=server_port, timeout=timeout, source=source
                     )
 
                 elapsed = time.time() - start_time

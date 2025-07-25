@@ -13,7 +13,8 @@ class ClientConfig:
         self.timeout = 5.0
         self.use_tcp = False
         self.log = "./client.log"
-        self.addr = None
+        self.bind_ip = None
+        self.bind_port = None
 
     @classmethod
     def from_args(cls):
@@ -42,10 +43,16 @@ class ClientConfig:
             "--log", type=str, default="./client.log", help="Log file path"
         )
         parser.add_argument(
-            "--addr",
+            "--bind-ip",
             type=str,
-            default=None,
+            default="127.0.0.1",
             help="Source IP to bind for outgoing DNS requests",
+        )
+        parser.add_argument(
+            "--bind-port",
+            type=int,
+            default=5353,
+            help="Source port to bind for outgoing DNS requests",
         )
 
         args = parser.parse_args()
@@ -58,7 +65,8 @@ class ClientConfig:
         config.timeout = args.timeout
         config.use_tcp = args.use_tcp
         config.log = args.log
-        config.addr = args.addr
+        config.bind_ip = args.bind_ip
+        config.bind_port = args.bind_port
 
         # Ensure log file directory exists
         log_path = Path(config.log)
