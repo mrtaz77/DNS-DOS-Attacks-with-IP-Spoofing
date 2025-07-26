@@ -53,7 +53,7 @@ class DNSClient:
         self.query_handler = DNSQueryHandler(
             self.file_logger,
             bind_ip=self.config.bind_ip,
-            bind_port=getattr(self.config, "port", None),
+            bind_port=self.config.bind_port,  # fixed: use correct config property
         )
         self.display = DisplayHandler(self.metrics, self.file_logger)
 
@@ -150,7 +150,6 @@ class DNSClient:
                     qname,
                     qtype,
                     self.config.timeout,
-                    self.config.use_tcp,
                 )
 
                 if result["success"]:

