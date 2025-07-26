@@ -59,6 +59,7 @@ def main():
         end_time = time.time()
         attack._summarize_attack(attack.metrics.get("start_time", end_time), end_time)
         attack.log_dns_request_stats()
+        attack.plot_metrics()
         sys.exit(0)
 
     signal.signal(signal.SIGINT, handle_sigint)

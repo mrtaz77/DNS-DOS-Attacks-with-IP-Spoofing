@@ -454,7 +454,7 @@ class DNSReplyFlood(AttackStrategy):
         self._plot_query_interarrival_times(requests, save_dir)
 
         if save_dir:
-            console.print(f"[green]📊 Plots saved to: {save_dir}[/green]")
+            console.print(f"📊 Plots saved to: [yellow]{save_dir}[/yellow]")
 
     def _plot_qps_over_time(self, requests, save_dir):
         timestamps = [req["timestamp"] for req in requests]
@@ -508,14 +508,25 @@ class DNSReplyFlood(AttackStrategy):
         timestamps = [req["timestamp"] for req in requests]
         if len(timestamps) > 1:
             iats = np.diff(sorted(timestamps))
+            # Histogram (frequency)
             plt.figure(figsize=(6, 4))
             sns.histplot(iats, bins=30, kde=True)
-            plt.title("Query Inter-Arrival Times")
+            plt.title("Query Inter-Arrival Times (Histogram)")
             plt.xlabel("Seconds")
             plt.ylabel("Frequency")
             plt.tight_layout()
             if save_dir:
-                plt.savefig(os.path.join(save_dir, "query_interarrival_times.png"))
+                plt.savefig(os.path.join(save_dir, "query_interarrival_times_hist.png"))
+            plt.close()
+            # Line plot (sequence of inter-arrival times)
+            plt.figure(figsize=(8, 4))
+            plt.plot(range(1, len(iats) + 1), iats, marker="o", linestyle="-")
+            plt.title("Query Inter-Arrival Times (Line Plot)")
+            plt.xlabel("Query Index")
+            plt.ylabel("Inter-Arrival Time (s)")
+            plt.tight_layout()
+            if save_dir:
+                plt.savefig(os.path.join(save_dir, "query_interarrival_times_line.png"))
             plt.close()
 
     def attack(self):
