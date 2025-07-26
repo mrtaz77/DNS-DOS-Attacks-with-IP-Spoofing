@@ -139,7 +139,7 @@ class DNSClient:
     def run_query_loop(self):
         """Run the main DNS query loop"""
         consecutive_failures = 0
-        max_consecutive_failures = 10
+        max_consecutive_failures = 1000
         query_id = 0
 
         console.print("\n[bold]🚀 Starting DNS queries...[/bold]\n")
