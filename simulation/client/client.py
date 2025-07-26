@@ -56,6 +56,7 @@ class DNSClient:
             self.file_logger,
             bind_ip=self.config.bind_ip,
             bind_port=self.config.bind_port,  # fixed: use correct config property
+            use_cookies=self.config.use_cookies
         )
         self.display = DisplayHandler(self.metrics, self.file_logger)
         self.plotting_engine = PlottingEngine(self.metrics, self.config.report_dir, self.file_logger)

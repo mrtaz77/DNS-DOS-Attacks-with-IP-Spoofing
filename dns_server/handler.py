@@ -7,13 +7,15 @@ from .utils.dns_cache import DNSCache, create_cache
 from .utils.acl import ACL
 from .utils.metrics import MetricsCollector
 from .utils.rate_limiter import RateLimiter
+from .utils.dns_cookies import DNSCookieManager, parse_cookie_option, create_cookie_option
 
 class DNSHandler:
     def __init__(self, zone_file, key_file=None, forwarder=None, forwarders=None,
                 acl_rules=None, tsig_key=None, is_secondary=False,
                 primary_server=None, primary_port=None, refresh_interval=None,
                 rate_limit_threshold=100, rate_limit_window=5, rate_limit_ban_duration=300,
-                cache_type="lru", cache_size=10000, redis_url=None):
+                cache_type="lru", cache_size=10000, redis_url=None,
+                cookie_required=False, cookie_secret_lifetime=86400*30):
         self.zone_file = zone_file
         self.zone = dns.zone.from_file(zone_file, relativize=False)
         self.lock = threading.Lock()
@@ -91,6 +93,14 @@ class DNSHandler:
             time_window=rate_limit_window,
             ban_duration=rate_limit_ban_duration
         )
+        
+        # Initialize DNS Cookie manager for anti-spoofing protection
+        self.cookie_required = cookie_required
+        self.cookie_manager = DNSCookieManager(secret_lifetime=cookie_secret_lifetime)
+        if cookie_required:
+            logging.info("DNS Cookies REQUIRED - enhanced protection against spoofing attacks")
+        else:
+            logging.info("DNS Cookies OPTIONAL - clients without cookies still served")
         
         # Initialize TSIG first
         if tsig_key:
@@ -285,6 +295,39 @@ class DNSHandler:
                     logging.warning("TSIG required for %s but not provided", qtype)
                     return None, None
                 # TSIG validation happens automatically during from_wire parsing
+            
+            # Step 3: DNS Cookie validation for anti-spoofing protection
+            client_cookie = None
+            server_cookie = None
+            cookie_valid = False
+            
+            # Check for DNS COOKIE option in EDNS(0)
+            if msg.edns >= 0:
+                for option in msg.options:
+                    if option.otype == 10:  # DNS COOKIE option code
+                        client_cookie, server_cookie = parse_cookie_option(option.data)
+                        if client_cookie:
+                            cookie_valid = True
+                            if server_cookie:
+                                # Validate existing server cookie
+                                cookie_valid = self.cookie_manager.validate_server_cookie(
+                                    client_ip, client_cookie, server_cookie)
+                        break
+            
+            # If cookies are required and no valid cookie, reject or respond with BADCOOKIE
+            if self.cookie_required and not cookie_valid:
+                logging.warning("DNS Cookie required but not valid from %s", client_ip)
+                resp = dns.message.make_response(msg)
+                resp.set_rcode(dns.rcode.BADCOOKIE)
+                
+                # Add new server cookie to response
+                if client_cookie:
+                    new_server_cookie = self.cookie_manager.generate_server_cookie(client_ip, client_cookie)
+                    cookie_data = create_cookie_option(client_cookie, new_server_cookie)
+                    resp.use_edns(edns=0)
+                    resp.options.append(dns.edns.GenericOption(10, cookie_data))
+                
+                return resp.to_wire(), None
                 if not msg.had_tsig:
                     logging.warning("TSIG validation failed for %s", qtype)
                     return None, None
@@ -341,6 +384,12 @@ class DNSHandler:
                 logging.info("Cache hit for %s %s", q.name, qtype)
                 resp = dns.message.make_response(msg)
                 resp.answer.append(rr)
+                # Add DNS Cookie to cached response
+                if client_cookie:
+                    new_server_cookie = self.cookie_manager.generate_server_cookie(client_ip, client_cookie)
+                    cookie_data = create_cookie_option(client_cookie, new_server_cookie)
+                    resp.use_edns(edns=0)
+                    resp.options.append(dns.edns.GenericOption(10, cookie_data))
                 if self.tsig:
                     resp.use_tsig(self.tsig.keyring, keyname=self.tsig.key_name)
                 return resp.to_wire(), None
@@ -348,6 +397,14 @@ class DNSHandler:
             if resp is None:
                 logging.warning("Unable to process query message")
                 return None, None
+            # Add DNS Cookie to response if client provided one
+            if client_cookie and resp:
+                new_server_cookie = self.cookie_manager.generate_server_cookie(client_ip, client_cookie)
+                cookie_data = create_cookie_option(client_cookie, new_server_cookie)
+                resp.use_edns(edns=0)
+                resp.options.append(dns.edns.GenericOption(10, cookie_data))
+                logging.debug("Added DNS Cookie to response for %s", client_ip)
+            
             if self.tsig and resp:
                 resp.use_tsig(self.tsig.keyring, keyname=self.tsig.key_name)
             logging.info("Answered query for %s %s", q.name, qtype)

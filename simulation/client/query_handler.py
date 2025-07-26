@@ -2,15 +2,18 @@ import socket
 import struct
 import time
 import random
+from dns_cookies_client import DNSCookieClient, add_cookie_to_dns_query, extract_cookie_from_response
 
 
 class DNSQueryHandler:
     """DNS query execution and response handling using raw sockets"""
 
-    def __init__(self, file_logger, bind_ip=None, bind_port=None):
+    def __init__(self, file_logger, bind_ip=None, bind_port=None, use_cookies=False):
         self.file_logger = file_logger
         self.bind_ip = bind_ip
         self.bind_port = bind_port
+        self.use_cookies = use_cookies
+        self.cookie_client = DNSCookieClient() if use_cookies else None
 
     def _build_dns_query(self, qname, qtype="A"):
         # Transaction ID: fixed 16-bit
@@ -297,6 +300,16 @@ class DNSQueryHandler:
         """Send DNS query using raw sockets (UDP only)"""
         try:
             query, txid = self._build_dns_query(qname, qtype)
+            
+            # Add DNS Cookie if enabled
+            if self.use_cookies and self.cookie_client:
+                client_cookie = self.cookie_client.generate_client_cookie()
+                server_cookie = self.cookie_client.get_server_cookie(server_ip)
+                query = add_cookie_to_dns_query(query, client_cookie, server_cookie)
+                self.file_logger.debug(
+                    f"DNS_QUERY_COOKIE - Added cookie to {qname} {qtype} query"
+                )
+            
             self.file_logger.debug(
                 f"DNS_QUERY - {qname} {qtype} to {server_ip}:{server_port}"
             )
@@ -314,6 +327,13 @@ class DNSQueryHandler:
                 resp = self._parse_dns_response(data, txid)
                 parse_end = time.time()
                 parsing_time = parse_end - parse_start
+                
+                # Extract and store DNS Cookie from response if present
+                if self.use_cookies and self.cookie_client and resp.get("success"):
+                    client_cookie_resp, server_cookie_resp = extract_cookie_from_response(data)
+                    if server_cookie_resp:
+                        self.cookie_client.store_server_cookie(server_ip, server_cookie_resp)
+                        self.file_logger.debug(f"DNS_COOKIE_STORED - Server cookie stored for {server_ip}")
                 # ---------------------------
                 resp["elapsed"] = elapsed
                 resp["parsing_time"] = parsing_time

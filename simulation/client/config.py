@@ -16,6 +16,7 @@ class ClientConfig:
         self.bind_ip = None
         self.bind_port = None
         self.report_dir = None
+        self.use_cookies = False
 
     @classmethod
     def from_args(cls):
@@ -61,6 +62,11 @@ class ClientConfig:
             default="simulation/client/analysis",
             help="Directory to save plots and metrics reports",
         )
+        parser.add_argument(
+            "--use-cookies",
+            action="store_true",
+            help="Use DNS Cookies (RFC 7873) for enhanced security",
+        )
 
         args = parser.parse_args()
 
@@ -75,6 +81,7 @@ class ClientConfig:
         config.bind_ip = args.bind_ip
         config.bind_port = args.bind_port
         config.report_dir = args.report_dir
+        config.use_cookies = args.use_cookies
 
         # Ensure log file directory exists
         log_path = Path(config.log)
