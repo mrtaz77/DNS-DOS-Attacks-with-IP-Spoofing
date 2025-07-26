@@ -1,0 +1,18 @@
+DNS Security Analysis Report
+==================================================
+
+SUMMARY METRICS:
+Total Requests: 79,750
+Unique Clients: 2
+NXDOMAIN Rate: 38.01%
+Cache Hit Rate: 8.39%
+
+SECURITY ANALYSIS:
+Suspicious Clients: 0
+Subdomain Flood: 28
+Amplification: 61,966
+
+PERFORMANCE METRICS:
+Peak QPS: 2952
+Average QPS: 331.26
+Busiest Hour: 2025-07-26 12:00:00 (293,802 requests)
