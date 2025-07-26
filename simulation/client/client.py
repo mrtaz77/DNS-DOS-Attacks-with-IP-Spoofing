@@ -83,22 +83,28 @@ class DNSClient:
             self.config.server_ip, self.config.server_port
         )
 
-    def handle_successful_response(self, qname, qtype, result):
+    def handle_successful_response(self, qname, qtype, result, parsing_time):
         """Handle successful DNS response"""
         elapsed = result["elapsed"]
         self.metrics.total_response_time += elapsed
 
         if elapsed > 1.0:
             self.metrics.delayed += 1
-            self.display.log_response(qname, qtype, result, "DELAYED")
+            self.display.log_response(qname, qtype, result, "DELAYED", parsing_time)
         else:
             self.metrics.success += 1
-            self.display.log_response(qname, qtype, result, "SUCCESS")
+            self.display.log_response(qname, qtype, result, "SUCCESS", parsing_time)
 
         return 0  # Reset consecutive failures
 
     def handle_failed_response(
-        self, qname, qtype, result, consecutive_failures, max_consecutive_failures
+        self,
+        qname,
+        qtype,
+        result,
+        consecutive_failures,
+        max_consecutive_failures,
+        parsing_time,
     ):
         """Handle failed DNS response"""
         if result["error"] == "TIMEOUT":
@@ -108,7 +114,7 @@ class DNSClient:
             self.file_logger.warning(
                 f"TIMEOUT - {qname} {qtype} (consecutive: {consecutive_failures})"
             )
-            self.display.log_response(qname, qtype, result, "FAILURE")
+            self.display.log_response(qname, qtype, result, "FAILURE", parsing_time)
 
             if consecutive_failures >= max_consecutive_failures:
                 console.print(
@@ -123,7 +129,7 @@ class DNSClient:
                 f"[red]❌ ERROR for {qname} ({qtype}): {result['error']}[/red]"
             )
             self.file_logger.error(f"ERROR - {qname} {qtype}: {result['error']}")
-            self.display.log_response(qname, qtype, result, "FAILURE")
+            self.display.log_response(qname, qtype, result, "FAILURE", parsing_time)
 
         return consecutive_failures
 
@@ -152,9 +158,10 @@ class DNSClient:
                     self.config.timeout,
                 )
 
+                parsing_time = result.get("parsing_time", 0)
                 if result["success"]:
                     consecutive_failures = self.handle_successful_response(
-                        qname, qtype, result
+                        qname, qtype, result, parsing_time
                     )
                 else:
                     consecutive_failures = self.handle_failed_response(
@@ -163,6 +170,7 @@ class DNSClient:
                         result,
                         consecutive_failures,
                         max_consecutive_failures,
+                        parsing_time,
                     )
 
             except Exception as e:

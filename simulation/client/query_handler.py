@@ -13,7 +13,7 @@ class DNSQueryHandler:
         self.bind_port = bind_port
 
     def _build_dns_query(self, qname, qtype="A"):
-        # Transaction ID: random 16-bit
+        # Transaction ID: fixed 16-bit
         txid = 0x1337
         # Flags: standard query, recursion desired
         flags = 0x0100
@@ -120,6 +120,8 @@ class DNSQueryHandler:
             return self._parse_txt_record(rdata)
         elif atype == 46:  # RRSIG
             return self._parse_rrsig_record(data, rdata)
+        elif atype == 13:  # HINFO
+            return self._parse_hinfo_record(rdata)
         elif atype == 48:  # DNSKEY
             return self._parse_dnskey_record(rdata)
         elif atype == 255:  # ANY
@@ -267,6 +269,30 @@ class DNSQueryHandler:
         except Exception:
             return "DNSKEY:(parse error)"
 
+    def _parse_hinfo_record(self, rdata):
+        try:
+            # HINFO: <CPU> <OS>, both as counted strings
+            if len(rdata) < 2:
+                return "HINFO:(parse error)"
+            cpu_len = rdata[0]
+            if 1 + cpu_len > len(rdata):
+                return "HINFO:(parse error)"
+            cpu = rdata[1 : 1 + cpu_len].decode(errors="replace")
+            os_len_offset = 1 + cpu_len
+            if os_len_offset >= len(rdata):
+                os = ""
+            else:
+                os_len = rdata[os_len_offset]
+                if os_len_offset + 1 + os_len > len(rdata):
+                    os = ""
+                else:
+                    os = rdata[os_len_offset + 1 : os_len_offset + 1 + os_len].decode(
+                        errors="replace"
+                    )
+            return f"HINFO:CPU={cpu} OS={os}"
+        except Exception:
+            return "HINFO:(parse error)"
+
     def send_query(self, server_ip, server_port, qname, qtype, timeout=10):
         """Send DNS query using raw sockets (UDP only)"""
         try:
@@ -283,15 +309,22 @@ class DNSQueryHandler:
             try:
                 data, _ = sock.recvfrom(4096)
                 elapsed = time.time() - start
+                # --- Measure parsing time ---
+                parse_start = time.time()
                 resp = self._parse_dns_response(data, txid)
+                parse_end = time.time()
+                parsing_time = parse_end - parse_start
+                # ---------------------------
                 resp["elapsed"] = elapsed
+                resp["parsing_time"] = parsing_time
                 return resp
             except socket.timeout:
                 return {
                     "success": False,
-                    "elapsed": 0,
+                    "elapsed": timeout,
                     "error": "TIMEOUT",
                     "output": "DNS query timeout",
+                    "parsing_time": 0,
                 }
             finally:
                 sock.close()
@@ -301,6 +334,7 @@ class DNSQueryHandler:
                 "elapsed": 0,
                 "error": "EXCEPTION",
                 "output": str(e),
+                "parsing_time": 0,
             }
 
     def test_connectivity(self, server, port):

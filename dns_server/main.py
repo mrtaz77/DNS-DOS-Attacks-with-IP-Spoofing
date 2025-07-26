@@ -41,6 +41,10 @@ def main():
     parser.add_argument("--rate-limit-window", type=int, default=5, help="Rate limit time window in seconds")
     parser.add_argument("--rate-limit-ban-duration", type=int, default=300, help="IP ban duration in seconds")
     
+    # Server performance arguments
+    parser.add_argument("--max-workers", type=int, default=50, help="Maximum worker threads for UDP server")
+    parser.add_argument("--queue-size", type=int, default=1000, help="Request queue size for UDP server")
+    
     # Cache configuration arguments
     parser.add_argument("--cache-type", choices=["simple", "lru", "redis", "hybrid"], default="lru", 
                        help="Cache type: simple (no limit), lru (in-memory), redis (persistent), hybrid (memory+redis)")
@@ -79,8 +83,9 @@ def main():
     )
 
     threads = []
-    # UDP server
-    udp = UDPServer(handler, args.addr, args.port_udp)
+    # UDP server with improved thread pool management
+    udp = UDPServer(handler, args.addr, args.port_udp, 
+                   max_workers=args.max_workers, queue_size=args.queue_size)
     threads.append(threading.Thread(target=udp.serve, daemon=True))
 
     # TCP server

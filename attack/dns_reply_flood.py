@@ -9,6 +9,11 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 from attack.attack_strategy import AttackStrategy
+import matplotlib.pyplot as plt
+import seaborn as sns
+import shutil
+import numpy as np
+from collections import Counter
 
 console = Console()
 
@@ -136,6 +141,7 @@ class DNSReplyFlood(AttackStrategy):
         valid_domains=None,
         query_types=None,
         log_file=None,
+        report_dir=None,
     ):
         super().__init__(server_ip, server_port, duration, threads)
         self.server_ip = server_ip
@@ -163,6 +169,7 @@ class DNSReplyFlood(AttackStrategy):
             48,  # DNSKEY
             255,  # ANY
         ]
+        self.report_dir = report_dir
 
         # Setup file logger (decoupled from console logger)
         log_path = log_file if log_file else "./dns_reply_flood_attack.log"
@@ -352,10 +359,7 @@ class DNSReplyFlood(AttackStrategy):
         while self.attack_active:
             try:
                 domain = self._pick_query_domain()
-                if random.random() < 0.7:
-                    qtype = 255  # ANY
-                else:
-                    qtype = random.choice(self.query_types)
+                qtype = random.choice(self.query_types)
                 spoofed_port = self.spoofed_port
                 self._send_dns_query(self.spoofed_ip, spoofed_port, domain, qtype)
                 time.sleep(0.01)
@@ -426,6 +430,102 @@ class DNSReplyFlood(AttackStrategy):
             f"DNS_REQUEST_STATS - Query type counts: {[(dns_query_type_dict.get(t, t), c) for t, c in top_types]}"
         )
 
+    def plot_metrics(self):
+        """Plot attack metrics using matplotlib and seaborn, and save to report_dir if set."""
+        requests = self.metrics.get("dns_requests", [])
+        if not requests:
+            console.print("[yellow]No DNS requests to plot.[/yellow]")
+            return
+
+        save_dir = None
+        if self.report_dir:
+            save_dir = os.path.abspath(self.report_dir)
+            # Clear or create the directory
+            if os.path.exists(save_dir):
+                shutil.rmtree(save_dir)
+            os.makedirs(save_dir, exist_ok=True)
+
+        self._plot_qps_over_time(requests, save_dir)
+        self._plot_query_type_distribution(requests, save_dir)
+        self._plot_top_queried_domains(requests, save_dir)
+        self._plot_query_interarrival_times(requests, save_dir)
+
+        if save_dir:
+            console.print(f"📊 Plots saved to: [yellow]{save_dir}[/yellow]")
+
+    def _plot_qps_over_time(self, requests, save_dir):
+        timestamps = [req["timestamp"] for req in requests]
+        if timestamps:
+            min_time = min(timestamps)
+            rel_times = [t - min_time for t in timestamps]
+            bins = np.arange(0, max(rel_times) + 2)
+            counts, _ = np.histogram(rel_times, bins=bins)
+            plt.figure(figsize=(8, 4))
+            plt.plot(bins[:-1], counts, marker="o")
+            plt.title("DNS Queries Sent Per Second")
+            plt.xlabel("Time (s)")
+            plt.ylabel("Queries per second")
+            plt.grid(True)
+            plt.tight_layout()
+            if save_dir:
+                plt.savefig(os.path.join(save_dir, "qps_over_time.png"))
+            plt.close()
+
+    def _plot_query_type_distribution(self, requests, save_dir):
+        qtypes = [req["query_type"] for req in requests]
+        if qtypes:
+            plt.figure(figsize=(6, 4))
+            qtype_names = [dns_query_type_dict.get(q, str(q)) for q in qtypes]
+            sns.countplot(x=qtype_names, order=sorted(set(qtype_names)))
+            plt.title("DNS Query Type Distribution")
+            plt.xlabel("Query Type")
+            plt.ylabel("Count")
+            plt.tight_layout()
+            if save_dir:
+                plt.savefig(os.path.join(save_dir, "query_type_distribution.png"))
+            plt.close()
+
+    def _plot_top_queried_domains(self, requests, save_dir):
+        domains = [req["query_name"] for req in requests]
+        domain_counts = Counter(domains)
+        top_domains = domain_counts.most_common(10)
+        if top_domains:
+            plt.figure(figsize=(8, 4))
+            names, counts = zip(*top_domains)
+            sns.barplot(x=list(counts), y=list(names), orient="h")
+            plt.title("Top 10 Queried Domains")
+            plt.xlabel("Query Count")
+            plt.ylabel("Domain")
+            plt.tight_layout()
+            if save_dir:
+                plt.savefig(os.path.join(save_dir, "top_queried_domains.png"))
+            plt.close()
+
+    def _plot_query_interarrival_times(self, requests, save_dir):
+        timestamps = [req["timestamp"] for req in requests]
+        if len(timestamps) > 1:
+            iats = np.diff(sorted(timestamps))
+            # Histogram (frequency)
+            plt.figure(figsize=(6, 4))
+            sns.histplot(iats, bins=30, kde=True)
+            plt.title("Query Inter-Arrival Times (Histogram)")
+            plt.xlabel("Seconds")
+            plt.ylabel("Frequency")
+            plt.tight_layout()
+            if save_dir:
+                plt.savefig(os.path.join(save_dir, "query_interarrival_times_hist.png"))
+            plt.close()
+            # Line plot (sequence of inter-arrival times)
+            plt.figure(figsize=(8, 4))
+            plt.plot(range(1, len(iats) + 1), iats, marker="o", linestyle="-")
+            plt.title("Query Inter-Arrival Times (Line Plot)")
+            plt.xlabel("Query Index")
+            plt.ylabel("Inter-Arrival Time (s)")
+            plt.tight_layout()
+            if save_dir:
+                plt.savefig(os.path.join(save_dir, "query_interarrival_times_line.png"))
+            plt.close()
+
     def attack(self):
         self._print_attack_header()
         self._log_attack_parameters()
@@ -447,6 +547,7 @@ class DNSReplyFlood(AttackStrategy):
         end_time = time.time()
         self._summarize_attack(start_time, end_time)
         self.log_dns_request_stats()
+        self.plot_metrics()
 
     def _print_attack_header(self):
         header_text = (

@@ -12,6 +12,7 @@ class Metrics:
         self.failure = 0  # Timeouts only
         self.delayed = 0  # Responses > 1 second
         self.total_response_time = 0.0
+        self.total_parsing_time = 0.0  # New: total parsing time
         self.requests_log = []
         self.responses_log = []
         self.file_logger = file_logger
@@ -31,7 +32,9 @@ class Metrics:
             f"REQUEST [{request_data['id']:04d}] {qname} {qtype} at {timestamp}"
         )
 
-    def add_response(self, qname, qtype, rcode, elapsed, answers_count, status):
+    def add_response(
+        self, qname, qtype, rcode, elapsed, answers_count, status, parsing_time
+    ):
         """Log incoming response"""
         response_data = {
             "qname": qname,
@@ -40,13 +43,15 @@ class Metrics:
             "elapsed": elapsed,
             "answers_count": answers_count,
             "status": status,
+            "parsing_time": parsing_time,
             "id": len(self.responses_log) + 1,
         }
         self.responses_log.append(response_data)
+        self.total_parsing_time += parsing_time  # accumulate parsing time
 
-        # Log to file
+        # Log to file (convert parsing_time to microseconds)
         self.file_logger.info(
-            f"RESPONSE [{response_data['id']:04d}] {qname} {qtype} [{rcode}] {answers_count} answers {(elapsed * 1000):.3f}ms [{status}]"
+            f"RESPONSE [{response_data['id']:04d}] {qname} {qtype} [{rcode}] {answers_count} answers {(elapsed * 1000):.3f}ms parsing={(parsing_time * 1_000_000):.0f}μs [{status}]"
         )
 
     def log(self):
@@ -55,9 +60,14 @@ class Metrics:
         avg_response_time = self.total_response_time / max(
             self.success + self.delayed, 1
         )
+        avg_parsing_time = self.total_parsing_time / max(
+            self.success + self.delayed + self.failure, 1
+        )
 
         # Create metrics table with appropriate colors for each metric
-        table = Table(title="📊 DNS Client Metrics", box=box.ROUNDED, border_style="bright_blue")
+        table = Table(
+            title="📊 DNS Client Metrics", box=box.ROUNDED, border_style="bright_blue"
+        )
         table.add_column("Metric", style="cyan", no_wrap=True)
         table.add_column("Count", style="magenta")
         table.add_column("Percentage", style="green")
@@ -85,10 +95,15 @@ class Metrics:
             f"[blue]{(avg_response_time * 1000):.3f}ms[/]",
             "-",
         )
+        table.add_row(
+            "[bold magenta]Avg Parsing Time[/]",
+            f"[magenta]{(avg_parsing_time * 1_000_000):.3f}μs[/]",
+            "-",
+        )
 
         console.print(table)  # Print summary table to console
 
-        # Log metrics to file
+        # Log metrics to file (convert avg_parsing_time to microseconds)
         self.file_logger.info(
-            f"METRICS - Sent: {self.sent}, Success: {self.success} ({self.success*100/total:.2f}%), Failure: {self.failure} ({self.failure*100/total:.2f}%), Delayed: {self.delayed} ({self.delayed*100/total:.2f}%), Avg Time: {(avg_response_time * 1000):.3f}ms"
+            f"METRICS - Sent: {self.sent}, Success: {self.success} ({self.success*100/total:.2f}%), Failure: {self.failure} ({self.failure*100/total:.2f}%), Delayed: {self.delayed} ({self.delayed*100/total:.2f}%), Avg Time: {(avg_response_time * 1000):.3f}ms, Avg Parsing: {(avg_parsing_time * 1_000_000):.0f}μs"
         )
