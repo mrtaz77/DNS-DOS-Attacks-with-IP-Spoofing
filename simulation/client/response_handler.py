@@ -46,14 +46,16 @@ class DisplayHandler:
 
         console.print(text)
 
-    def log_response(self, qname, qtype, result, status):
+    def log_response(self, qname, qtype, result, status, parsing_time):
         """Log incoming DNS response with Rich formatting"""
         elapsed = result.get("elapsed", 0)
         answers_count = result.get("answers_count", 0)
         rcode = result.get("rcode", "UNKNOWN")
         output = result.get("output", "")
 
-        self.metrics.add_response(qname, qtype, rcode, elapsed, answers_count, status)
+        self.metrics.add_response(
+            qname, qtype, rcode, elapsed, answers_count, status, parsing_time
+        )
 
         # Console logging with Rich formatting
         text = Text()
@@ -73,14 +75,15 @@ class DisplayHandler:
             style="white",
         )
         # Output formatting based on status
-        output_text = output.strip().replace(chr(10), ' ')
+        output_text = output.strip().replace(chr(10), " ")
         if status == "SUCCESS":
             text.append(f"{output_text} ", style="bold green")
         elif status == "DELAYED":
             text.append(f"{output_text} ", style="bold yellow")
         else:
             text.append(f"{output_text} ", style="bold red")
-        text.append(f"({(elapsed * 1000):.3f}ms)", style="dim")
+        text.append(f"({(elapsed * 1000):.3f}ms", style="dim")
+        text.append(f", parsing {(parsing_time * 1_000_000):.3f}μs)", style="dim")
 
         console.print(text)
 

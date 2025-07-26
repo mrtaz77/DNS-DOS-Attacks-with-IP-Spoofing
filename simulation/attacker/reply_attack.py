@@ -32,6 +32,12 @@ def main():
     parser.add_argument(
         "--log-file", type=str, default=None, help="Log file path (optional)"
     )
+    parser.add_argument(
+        "--report-dir",
+        type=str,
+        default=None,
+        help="Directory to save attack plots (optional)",
+    )
     args = parser.parse_args()
 
     attack = DNSReplyFlood(
@@ -42,6 +48,7 @@ def main():
         duration=args.duration,
         threads=args.threads,
         log_file=args.log_file,
+        report_dir=args.report_dir,
     )
 
     def handle_sigint(signum, frame):

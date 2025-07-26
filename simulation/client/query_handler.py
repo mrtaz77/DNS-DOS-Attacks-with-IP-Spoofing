@@ -13,7 +13,7 @@ class DNSQueryHandler:
         self.bind_port = bind_port
 
     def _build_dns_query(self, qname, qtype="A"):
-        # Transaction ID: random 16-bit
+        # Transaction ID: fixed 16-bit
         txid = 0x1337
         # Flags: standard query, recursion desired
         flags = 0x0100
@@ -283,15 +283,22 @@ class DNSQueryHandler:
             try:
                 data, _ = sock.recvfrom(4096)
                 elapsed = time.time() - start
+                # --- Measure parsing time ---
+                parse_start = time.time()
                 resp = self._parse_dns_response(data, txid)
+                parse_end = time.time()
+                parsing_time = parse_end - parse_start
+                # ---------------------------
                 resp["elapsed"] = elapsed
+                resp["parsing_time"] = parsing_time
                 return resp
             except socket.timeout:
                 return {
                     "success": False,
-                    "elapsed": 0,
+                    "elapsed": timeout,
                     "error": "TIMEOUT",
                     "output": "DNS query timeout",
+                    "parsing_time": 0,
                 }
             finally:
                 sock.close()
@@ -301,6 +308,7 @@ class DNSQueryHandler:
                 "elapsed": 0,
                 "error": "EXCEPTION",
                 "output": str(e),
+                "parsing_time": 0,
             }
 
     def test_connectivity(self, server, port):
