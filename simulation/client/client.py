@@ -7,6 +7,7 @@ from metrics import Metrics
 from zone_file_parser import ZoneParser
 from query_handler import DNSQueryHandler
 from response_handler import DisplayHandler
+from plotting import PlottingEngine
 
 
 class DNSClient:
@@ -22,6 +23,7 @@ class DNSClient:
         self.query_handler = None
         self.display = None
         self.queries = []
+        self.plotting_engine = None
 
         # Setup signal handler
         signal.signal(signal.SIGINT, self._signal_handler)
@@ -56,6 +58,7 @@ class DNSClient:
             bind_port=self.config.bind_port,  # fixed: use correct config property
         )
         self.display = DisplayHandler(self.metrics, self.file_logger)
+        self.plotting_engine = PlottingEngine(self.metrics, self.config.report_dir, self.file_logger)
 
     def setup_queries(self):
         """Setup DNS queries from zone file or defaults"""
@@ -198,7 +201,19 @@ class DNSClient:
             self.run_query_loop()
 
         finally:
-            self.display.show_summary()
+            if self.display:
+                self.display.show_summary()
+            
+            # Generate plots and metrics reports
+            if self.plotting_engine:
+                console.print("\n[bold blue]📊 Generating comprehensive analysis reports...[/bold blue]")
+                try:
+                    self.plotting_engine.generate_all_reports()
+                    console.print(f"[green]✅ Analysis reports saved to: {self.config.report_dir}[/green]")
+                except Exception as e:
+                    console.print(f"[red]❌ Error generating reports: {e}[/red]")
+                    if self.file_logger:
+                        self.file_logger.error(f"PLOTTING_ERROR - {e}")
 
 
 if __name__ == "__main__":
