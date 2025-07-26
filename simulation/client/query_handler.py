@@ -120,6 +120,8 @@ class DNSQueryHandler:
             return self._parse_txt_record(rdata)
         elif atype == 46:  # RRSIG
             return self._parse_rrsig_record(data, rdata)
+        elif atype == 13:  # HINFO
+            return self._parse_hinfo_record(rdata)
         elif atype == 48:  # DNSKEY
             return self._parse_dnskey_record(rdata)
         elif atype == 255:  # ANY
@@ -266,6 +268,30 @@ class DNSQueryHandler:
             return f"DNSKEY:flags={flags} protocol={protocol} alg={algorithm} keylen={len(key_data)}"
         except Exception:
             return "DNSKEY:(parse error)"
+
+    def _parse_hinfo_record(self, rdata):
+        try:
+            # HINFO: <CPU> <OS>, both as counted strings
+            if len(rdata) < 2:
+                return "HINFO:(parse error)"
+            cpu_len = rdata[0]
+            if 1 + cpu_len > len(rdata):
+                return "HINFO:(parse error)"
+            cpu = rdata[1 : 1 + cpu_len].decode(errors="replace")
+            os_len_offset = 1 + cpu_len
+            if os_len_offset >= len(rdata):
+                os = ""
+            else:
+                os_len = rdata[os_len_offset]
+                if os_len_offset + 1 + os_len > len(rdata):
+                    os = ""
+                else:
+                    os = rdata[os_len_offset + 1 : os_len_offset + 1 + os_len].decode(
+                        errors="replace"
+                    )
+            return f"HINFO:CPU={cpu} OS={os}"
+        except Exception:
+            return "HINFO:(parse error)"
 
     def send_query(self, server_ip, server_port, qname, qtype, timeout=10):
         """Send DNS query using raw sockets (UDP only)"""
