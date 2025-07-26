@@ -2,6 +2,7 @@ import random
 from rich.table import Table
 from rich import box
 from logger import console
+import itertools
 
 
 class ZoneParser:
@@ -82,22 +83,27 @@ class ZoneParser:
         return names
 
     def generate_queries(self, zone_records, n=5):
-        """Return a list of random queries from zone file, plus external domains."""
+        """Return a list of random queries from zone file, plus external domains of various types."""
+
         queries = []
 
-        hardcoded_queries = [
-            ("google.com.", "A"),
-            ("facebook.com.", "A"),
-            ("example.com.", "A"),
-            ("www.google.com.", "A"),
-            ("www.example.com.", "A"),
-            ("nonexistentdomain12345.com.", "A"),
-            ("doesnotexist.example.com.", "A"),
-            ("cloudflare.com.", "A"),
-            ("github.com.", "A"),
-            ("stackoverflow.com.", "A"),
+        # Domains and record types to combine
+        domains = [
+            "google.com.",
+            "facebook.com.",
+            "example.com.",
+            "www.google.com.",
+            "www.example.com.",
+            "nonexistentdomain12345.com.",
+            "doesnotexist.example.com.",
+            "cloudflare.com.",
+            "github.com.",
+            "stackoverflow.com.",
         ]
+        record_types = ["A", "AAAA", "NS", "TXT"]
 
+        # Use itertools.product to generate all combinations
+        hardcoded_queries = list(itertools.product(domains, record_types))
         queries.extend(hardcoded_queries)
         self.file_logger.info(
             f"QUERY_PREP - Added {len(hardcoded_queries)} hardcoded queries"
@@ -105,9 +111,11 @@ class ZoneParser:
 
         if zone_records:
             selected = random.sample(zone_records, min(n, len(zone_records)))
-            queries.extend(selected)
+            for name, _ in selected:
+                for rtype in record_types:
+                    queries.append((name, rtype))
             self.file_logger.info(
-                f"QUERY_PREP - Added {len(selected)} queries from zone file"
+                f"QUERY_PREP - Added {len(selected) * len(record_types)} queries from zone file"
             )
 
         self.file_logger.info(f"QUERY_PREP - Total queries prepared: {len(queries)}")

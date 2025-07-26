@@ -50,7 +50,11 @@ class DNSClient:
         # Initialize components
         self.metrics = Metrics(self.file_logger)
         self.zone_parser = ZoneParser(self.file_logger)
-        self.query_handler = DNSQueryHandler(self.file_logger, bind_ip=self.config.addr)
+        self.query_handler = DNSQueryHandler(
+            self.file_logger,
+            bind_ip=self.config.bind_ip,
+            bind_port=self.config.bind_port,  # fixed: use correct config property
+        )
         self.display = DisplayHandler(self.metrics, self.file_logger)
 
     def setup_queries(self):
@@ -146,7 +150,6 @@ class DNSClient:
                     qname,
                     qtype,
                     self.config.timeout,
-                    self.config.use_tcp,
                 )
 
                 if result["success"]:
