@@ -353,7 +353,7 @@ class DNSReplyFlood(AttackStrategy):
         while self.attack_active:
             try:
                 domain = self._pick_query_domain()
-                if random.random() < 0.5:
+                if random.random() < 0.7:
                     qtype = 255  # ANY
                 else:
                     qtype = random.choice(self.query_types)
