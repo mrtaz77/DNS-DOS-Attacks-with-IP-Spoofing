@@ -7,6 +7,8 @@ Client-side support for DNS cookies to prevent spoofing attacks
 import secrets
 import struct
 from typing import Optional, Tuple, Dict
+import dns.message
+import dns.edns
 
 
 class DNSCookieClient:
@@ -19,15 +21,17 @@ class DNSCookieClient:
         """Initialize DNS Cookie client"""
         # Store server cookies by server IP
         self.server_cookies: Dict[str, bytes] = {}
+        # Generate a persistent client cookie for this client instance
+        self.client_cookie = secrets.token_bytes(8)
         
-    def generate_client_cookie(self) -> bytes:
+    def get_client_cookie(self) -> bytes:
         """
-        Generate a new 8-byte client cookie
+        Get the persistent client cookie for this client
         
         Returns:
-            8-byte random client cookie
+            8-byte client cookie (same for all requests from this client)
         """
-        return secrets.token_bytes(8)
+        return self.client_cookie
     
     def store_server_cookie(self, server_ip: str, server_cookie: bytes):
         """
@@ -88,8 +92,26 @@ class DNSCookieClient:
         return client_cookie, server_cookie
 
 
-def add_cookie_to_dns_query(query_packet: bytes, client_cookie: bytes, 
-                          server_cookie: Optional[bytes] = None) -> bytes:
+def add_cookie_to_dns_message(msg: dns.message.Message, client_cookie: bytes, 
+                              server_cookie: Optional[bytes] = None) -> dns.message.Message:
+    """
+    Add DNS Cookie option to a dnspython message object
+    
+    Args:
+        msg: DNS message object
+        client_cookie: 8-byte client cookie
+        server_cookie: Optional 8-byte server cookie
+        
+    Returns:
+        Modified DNS message with cookie option
+    """
+    cookie_option = dns.edns.CookieOption(client_cookie, server_cookie or b'')
+    msg.use_edns(edns=0, options=[cookie_option])
+    return msg
+
+
+def add_cookie_to_dns_query_raw(query_packet: bytes, client_cookie: bytes, 
+                               server_cookie: Optional[bytes] = None) -> bytes:
     """
     Add DNS Cookie option to an existing DNS query packet
     

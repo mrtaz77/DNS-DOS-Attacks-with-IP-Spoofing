@@ -56,8 +56,15 @@ def main():
                        help="Require DNS Cookies for all queries (RFC 7873) - drops requests without valid cookies")
     parser.add_argument("--cookie-secret-lifetime", type=int, default=86400*30,
                        help="DNS Cookie server secret lifetime in seconds (default: 30 days)")
+    parser.add_argument("--debug", action="store_true", default=False,
+                       help="Enable debug logging")
     
     args = parser.parse_args()
+    
+    # Set logging level based on debug flag
+    if args.debug:
+        logging.getLogger().setLevel(logging.DEBUG)
+        logging.debug("Debug logging enabled")
 
     # Handle both single forwarder and multiple forwarders
     forwarders = []

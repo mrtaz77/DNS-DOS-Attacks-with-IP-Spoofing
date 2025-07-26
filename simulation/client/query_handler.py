@@ -2,7 +2,7 @@ import socket
 import struct
 import time
 import random
-from dns_cookies_client import DNSCookieClient, add_cookie_to_dns_query, extract_cookie_from_response
+from dns_cookies_client import DNSCookieClient, add_cookie_to_dns_query_raw, extract_cookie_from_response
 
 
 class DNSQueryHandler:
@@ -303,11 +303,11 @@ class DNSQueryHandler:
             
             # Add DNS Cookie if enabled
             if self.use_cookies and self.cookie_client:
-                client_cookie = self.cookie_client.generate_client_cookie()
+                client_cookie = self.cookie_client.get_client_cookie()
                 server_cookie = self.cookie_client.get_server_cookie(server_ip)
-                query = add_cookie_to_dns_query(query, client_cookie, server_cookie)
+                query = add_cookie_to_dns_query_raw(query, client_cookie, server_cookie)
                 self.file_logger.debug(
-                    f"DNS_QUERY_COOKIE - Added cookie to {qname} {qtype} query"
+                    f"DNS_QUERY_COOKIE - Added cookie to {qname} {qtype} query (client={client_cookie.hex()[:8]}..., server={'present' if server_cookie else 'none'})"
                 )
             
             self.file_logger.debug(
@@ -330,7 +330,7 @@ class DNSQueryHandler:
                 
                 # Extract and store DNS Cookie from response if present
                 if self.use_cookies and self.cookie_client and resp.get("success"):
-                    client_cookie_resp, server_cookie_resp = extract_cookie_from_response(data)
+                    _, server_cookie_resp = extract_cookie_from_response(data)
                     if server_cookie_resp:
                         self.cookie_client.store_server_cookie(server_ip, server_cookie_resp)
                         self.file_logger.debug(f"DNS_COOKIE_STORED - Server cookie stored for {server_ip}")
