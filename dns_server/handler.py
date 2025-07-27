@@ -7,7 +7,7 @@ from .utils.dns_cache import DNSCache, create_cache
 from .utils.acl import ACL
 from .utils.metrics import MetricsCollector
 from .utils.rate_limiter import RateLimiter
-from .utils.dns_cookies import DNSCookieManager, parse_cookie_option, create_cookie_option
+from .utils.dns_cookies import DNSCookieManager, parse_cookie_option
 
 class DNSHandler:
     def __init__(self, zone_file, key_file=None, forwarder=None, forwarders=None,
@@ -305,13 +305,22 @@ class DNSHandler:
             if msg.edns >= 0:
                 for option in msg.options:
                     if option.otype == 10:  # DNS COOKIE option code
-                        client_cookie, server_cookie = parse_cookie_option(option.data)
+                        if hasattr(option, 'client'):
+                            # dnspython CookieOption object
+                            client_cookie = option.client
+                            server_cookie = option.server if option.server else None
+                        else:
+                            # Generic option, parse manually
+                            client_cookie, server_cookie = parse_cookie_option(option.data)
+                        
                         if client_cookie:
-                            cookie_valid = True
-                            if server_cookie:
+                            if server_cookie and len(server_cookie) > 0:
                                 # Validate existing server cookie
                                 cookie_valid = self.cookie_manager.validate_server_cookie(
                                     client_ip, client_cookie, server_cookie)
+                            else:
+                                # First-time client with only client cookie - this is valid
+                                cookie_valid = True
                         break
             
             # If cookies are required and no valid cookie, reject or respond with BADCOOKIE
@@ -323,9 +332,8 @@ class DNSHandler:
                 # Add new server cookie to response
                 if client_cookie:
                     new_server_cookie = self.cookie_manager.generate_server_cookie(client_ip, client_cookie)
-                    cookie_data = create_cookie_option(client_cookie, new_server_cookie)
-                    resp.use_edns(edns=0)
-                    resp.options.append(dns.edns.GenericOption(10, cookie_data))
+                    cookie_option = dns.edns.CookieOption(client_cookie, new_server_cookie)
+                    resp.use_edns(edns=0, options=[cookie_option])
                 
                 return resp.to_wire(), None
                 if not msg.had_tsig:
@@ -387,9 +395,8 @@ class DNSHandler:
                 # Add DNS Cookie to cached response
                 if client_cookie:
                     new_server_cookie = self.cookie_manager.generate_server_cookie(client_ip, client_cookie)
-                    cookie_data = create_cookie_option(client_cookie, new_server_cookie)
-                    resp.use_edns(edns=0)
-                    resp.options.append(dns.edns.GenericOption(10, cookie_data))
+                    cookie_option = dns.edns.CookieOption(client_cookie, new_server_cookie)
+                    resp.use_edns(edns=0, options=[cookie_option])
                 if self.tsig:
                     resp.use_tsig(self.tsig.keyring, keyname=self.tsig.key_name)
                 return resp.to_wire(), None
@@ -400,9 +407,8 @@ class DNSHandler:
             # Add DNS Cookie to response if client provided one
             if client_cookie and resp:
                 new_server_cookie = self.cookie_manager.generate_server_cookie(client_ip, client_cookie)
-                cookie_data = create_cookie_option(client_cookie, new_server_cookie)
-                resp.use_edns(edns=0)
-                resp.options.append(dns.edns.GenericOption(10, cookie_data))
+                cookie_option = dns.edns.CookieOption(client_cookie, new_server_cookie)
+                resp.use_edns(edns=0, options=[cookie_option])
                 logging.debug("Added DNS Cookie to response for %s", client_ip)
             
             if self.tsig and resp:

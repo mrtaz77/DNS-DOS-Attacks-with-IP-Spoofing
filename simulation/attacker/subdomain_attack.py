@@ -32,6 +32,11 @@ def main():
         default=None,
         help="Directory to save attack plots (optional)",
     )
+    parser.add_argument(
+        "--server-cookie-required",
+        action="store_true", 
+        help="Note: Server has cookie defense enabled (attacker will fail without valid cookies)"
+    )
     args = parser.parse_args()
 
     attack = DNSRandomSubdomainQueryFlood(
