@@ -26,6 +26,12 @@ def main():
     parser.add_argument(
         "--log-file", type=str, default=None, help="Log file path (optional)"
     )
+    parser.add_argument(
+        "--report-dir",
+        type=str,
+        default=None,
+        help="Directory to save attack plots (optional)",
+    )
     args = parser.parse_args()
 
     attack = DNSRandomSubdomainQueryFlood(
@@ -43,12 +49,13 @@ def main():
         end_time = time.time()
         attack._summarize_attack(attack.metrics.get("start_time", end_time), end_time)
         attack.log_dns_request_stats()
+        attack.plot_metrics(args.report_dir)
         sys.exit(0)
 
     signal.signal(signal.SIGINT, handle_sigint)
 
     try:
-        attack.attack()
+        attack.attack(report_dir=args.report_dir)
     except KeyboardInterrupt:
         handle_sigint(None, None)
 

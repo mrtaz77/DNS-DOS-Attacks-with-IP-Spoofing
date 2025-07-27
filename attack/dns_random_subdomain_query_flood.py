@@ -7,6 +7,11 @@ import time
 import threading
 import string
 import logging
+import matplotlib.pyplot as plt
+import seaborn as sns
+import shutil
+import numpy as np
+from collections import Counter
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -479,38 +484,179 @@ class DNSRandomSubdomainQueryFlood(AttackStrategy):
             )
 
     def log_dns_request_stats(self):
+        """Log meaningful stats for random subdomain query flood."""
         requests = self.metrics.get("dns_requests", [])
         total = len(requests)
         if total == 0:
             self.file_logger.info("DNS_REQUEST_STATS - No DNS requests recorded.")
             return
 
-        domain_counts = {}
+        # Count unique base domains, unique subdomains, and query types
+        base_domain_counts = {}
+        subdomain_lengths = []
         type_counts = {}
         for req in requests:
             domain = req.get("query_name")
             qtype = req.get("query_type")
-            domain_counts[domain] = domain_counts.get(domain, 0) + 1
+            # Extract base domain (last two labels)
+            labels = domain.split(".")
+            if len(labels) >= 2:
+                base = ".".join(labels[-2:])
+                base_domain_counts[base] = base_domain_counts.get(base, 0) + 1
+            # Subdomain length (all but last two labels)
+            if len(labels) > 2:
+                sub_len = len(".".join(labels[:-2]))
+                subdomain_lengths.append(sub_len)
             type_counts[qtype] = type_counts.get(qtype, 0) + 1
 
-        unique_domains = len(domain_counts)
+        unique_base_domains = len(base_domain_counts)
+        avg_subdomain_length = (
+            (sum(subdomain_lengths) / len(subdomain_lengths))
+            if subdomain_lengths
+            else 0
+        )
         unique_types = len(type_counts)
-        top_domains = sorted(domain_counts.items(), key=lambda x: x[1], reverse=True)[
-            :5
-        ]
+        top_base_domains = sorted(
+            base_domain_counts.items(), key=lambda x: x[1], reverse=True
+        )[:5]
         top_types = sorted(type_counts.items(), key=lambda x: x[1], reverse=True)
 
         self.file_logger.info(f"DNS_REQUEST_STATS - Total requests: {total}")
-        self.file_logger.info(f"DNS_REQUEST_STATS - Unique domains: {unique_domains}")
+        self.file_logger.info(
+            f"DNS_REQUEST_STATS - Unique base domains: {unique_base_domains}"
+        )
+        self.file_logger.info(
+            f"DNS_REQUEST_STATS - Avg subdomain length: {avg_subdomain_length:.2f}"
+        )
         self.file_logger.info(f"DNS_REQUEST_STATS - Unique query types: {unique_types}")
         self.file_logger.info(
-            f"DNS_REQUEST_STATS - Top 5 queried domains: {top_domains}"
+            f"DNS_REQUEST_STATS - Top 5 base domains: {top_base_domains}"
         )
         self.file_logger.info(
             f"DNS_REQUEST_STATS - Query type counts: {[(dns_query_type_dict.get(t, t), c) for t, c in top_types]}"
         )
 
-    def attack(self):
+    def plot_metrics(self, report_dir=None):
+        """Plot attack metrics relevant to random subdomain query flood."""
+        requests = self.metrics.get("dns_requests", [])
+        if not requests:
+            console.print("[yellow]No DNS requests to plot.[/yellow]")
+            return
+
+        save_dir = None
+        if report_dir:
+            save_dir = os.path.abspath(report_dir)
+            if os.path.exists(save_dir):
+                shutil.rmtree(save_dir)
+            os.makedirs(save_dir, exist_ok=True)
+
+        self._plot_qps_over_time(requests, save_dir)
+        self._plot_query_type_distribution(requests, save_dir)
+        self._plot_base_domain_distribution(requests, save_dir)
+        self._plot_subdomain_length_distribution(requests, save_dir)
+        self._plot_query_interarrival_times(requests, save_dir)
+
+        if save_dir:
+            console.print(f"📊 Plots saved to: [yellow]{save_dir}[/yellow]")
+
+    def _plot_qps_over_time(self, requests, save_dir):
+        timestamps = [req["timestamp"] for req in requests]
+        if timestamps:
+            min_time = min(timestamps)
+            rel_times = [t - min_time for t in timestamps]
+            bins = np.arange(0, max(rel_times) + 2)
+            counts, _ = np.histogram(rel_times, bins=bins)
+            plt.figure(figsize=(8, 4))
+            plt.plot(bins[:-1], counts, marker="o")
+            plt.title("DNS Queries Sent Per Second")
+            plt.xlabel("Time (s)")
+            plt.ylabel("Queries per second")
+            plt.grid(True)
+            plt.tight_layout()
+            if save_dir:
+                plt.savefig(os.path.join(save_dir, "qps_over_time.png"))
+            plt.close()
+
+    def _plot_query_type_distribution(self, requests, save_dir):
+        qtypes = [req["query_type"] for req in requests]
+        if qtypes:
+            plt.figure(figsize=(6, 4))
+            qtype_names = [dns_query_type_dict.get(q, str(q)) for q in qtypes]
+            sns.countplot(x=qtype_names, order=sorted(set(qtype_names)))
+            plt.title("DNS Query Type Distribution")
+            plt.xlabel("Query Type")
+            plt.ylabel("Count")
+            plt.tight_layout()
+            if save_dir:
+                plt.savefig(os.path.join(save_dir, "query_type_distribution.png"))
+            plt.close()
+
+    def _plot_base_domain_distribution(self, requests, save_dir):
+        # Plot top base domains (last two labels)
+        base_domains = []
+        for req in requests:
+            domain = req.get("query_name")
+            labels = domain.split(".")
+            if len(labels) >= 2:
+                base_domains.append(".".join(labels[-2:]))
+        base_counts = Counter(base_domains)
+        top_bases = base_counts.most_common(10)
+        if top_bases:
+            plt.figure(figsize=(8, 4))
+            names, counts = zip(*top_bases)
+            sns.barplot(x=list(counts), y=list(names), orient="h")
+            plt.title("Top 10 Queried Base Domains")
+            plt.xlabel("Query Count")
+            plt.ylabel("Base Domain")
+            plt.tight_layout()
+            if save_dir:
+                plt.savefig(os.path.join(save_dir, "top_base_domains.png"))
+            plt.close()
+
+    def _plot_subdomain_length_distribution(self, requests, save_dir):
+        # Plot distribution of subdomain lengths (number of chars before base domain)
+        sub_lengths = []
+        for req in requests:
+            domain = req.get("query_name")
+            labels = domain.split(".")
+            if len(labels) > 2:
+                sub = ".".join(labels[:-2])
+                sub_lengths.append(len(sub))
+        if sub_lengths:
+            plt.figure(figsize=(7, 4))
+            sns.histplot(sub_lengths, bins=20, kde=True)
+            plt.title("Subdomain Length Distribution")
+            plt.xlabel("Subdomain Length (characters)")
+            plt.ylabel("Count")
+            plt.tight_layout()
+            if save_dir:
+                plt.savefig(os.path.join(save_dir, "subdomain_length_hist.png"))
+            plt.close()
+
+    def _plot_query_interarrival_times(self, requests, save_dir):
+        timestamps = [req["timestamp"] for req in requests]
+        if len(timestamps) > 1:
+            iats = np.diff(sorted(timestamps))
+            plt.figure(figsize=(6, 4))
+            sns.histplot(iats, bins=30, kde=True)
+            plt.title("Query Inter-Arrival Times (Histogram)")
+            plt.xlabel("Seconds")
+            plt.ylabel("Frequency")
+            plt.tight_layout()
+            if save_dir:
+                plt.savefig(os.path.join(save_dir, "query_interarrival_times_hist.png"))
+            plt.close()
+            plt.figure(figsize=(8, 4))
+            plt.plot(range(1, len(iats) + 1), iats, marker="o", linestyle="-")
+            plt.title("Query Inter-Arrival Times (Line Plot)")
+            plt.xlabel("Query Index")
+            plt.ylabel("Inter-Arrival Time (s)")
+            plt.tight_layout()
+            if save_dir:
+                plt.savefig(os.path.join(save_dir, "query_interarrival_times_line.png"))
+            plt.close()
+
+    def attack(self, report_dir=None):
         """Execute the DNS Random Subdomain Query Flood attack with IP spoofing."""
         self._print_attack_header()
         self._log_attack_parameters()
@@ -532,6 +678,7 @@ class DNSRandomSubdomainQueryFlood(AttackStrategy):
         end_time = time.time()
         self._summarize_attack(start_time, end_time)
         self.log_dns_request_stats()
+        self.plot_metrics(report_dir)
 
     def _print_attack_header(self):
         header_text = (
