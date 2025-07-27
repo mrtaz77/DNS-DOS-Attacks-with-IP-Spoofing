@@ -1,6 +1,7 @@
 import signal
 import time
 import random
+import threading
 from config import ClientConfig
 from logger import ClientLogger, console
 from metrics import Metrics
@@ -24,6 +25,8 @@ class DNSClient:
         self.display = None
         self.queries = []
         self.plotting_engine = None
+        self.duration = None
+        self._duration_timer = None
 
         # Setup signal handler
         signal.signal(signal.SIGINT, self._signal_handler)
@@ -36,6 +39,17 @@ class DNSClient:
         if self.file_logger:
             self.file_logger.info(
                 "SIGNAL - Received interrupt signal, exiting gracefully"
+            )
+        self.running = False
+
+    def _duration_timeout(self):
+        """Called when duration timer expires."""
+        console.print(
+            "\n[bold yellow]⏰ Duration expired. Stopping client...[/bold yellow]"
+        )
+        if self.file_logger:
+            self.file_logger.info(
+                "DURATION - Simulation duration expired, stopping client"
             )
         self.running = False
 
@@ -56,10 +70,20 @@ class DNSClient:
             self.file_logger,
             bind_ip=self.config.bind_ip,
             bind_port=self.config.bind_port,  # fixed: use correct config property
-            use_cookies=self.config.use_cookies
+            use_cookies=self.config.use_cookies,
         )
         self.display = DisplayHandler(self.metrics, self.file_logger)
-        self.plotting_engine = PlottingEngine(self.metrics, self.config.report_dir, self.file_logger)
+        self.plotting_engine = PlottingEngine(
+            self.metrics, self.config.report_dir, self.file_logger
+        )
+
+        # Handle duration parameter (from CLI or config)
+        self.duration = getattr(self.config, "duration", None)
+        if self.duration and self.duration > 0:
+            self._duration_timer = threading.Timer(
+                self.duration, self._duration_timeout
+            )
+            self._duration_timer.daemon = True
 
     def setup_queries(self):
         """Setup DNS queries from zone file or defaults"""
@@ -146,6 +170,10 @@ class DNSClient:
         console.print("\n[bold]🚀 Starting DNS queries...[/bold]\n")
         self.file_logger.info("QUERY_START - Starting DNS query loop")
 
+        # Start duration timer if set
+        if self._duration_timer:
+            self._duration_timer.start()
+
         while self.running:
             qname, qtype = random.choice(self.queries)
             query_id += 1
@@ -188,6 +216,10 @@ class DNSClient:
 
             time.sleep(self.config.interval)
 
+        # Cancel timer if still running
+        if self._duration_timer:
+            self._duration_timer.cancel()
+
     def run(self):
         """Main execution method"""
         try:
@@ -204,13 +236,17 @@ class DNSClient:
         finally:
             if self.display:
                 self.display.show_summary()
-            
+
             # Generate plots and metrics reports
             if self.plotting_engine:
-                console.print("\n[bold blue]📊 Generating comprehensive analysis reports...[/bold blue]")
+                console.print(
+                    "\n[bold blue]📊 Generating comprehensive analysis reports...[/bold blue]"
+                )
                 try:
                     self.plotting_engine.generate_all_reports()
-                    console.print(f"[green]✅ Analysis reports saved to: {self.config.report_dir}[/green]")
+                    console.print(
+                        f"[green]✅ Analysis reports saved to: {self.config.report_dir}[/green]"
+                    )
                 except Exception as e:
                     console.print(f"[red]❌ Error generating reports: {e}[/red]")
                     if self.file_logger:
