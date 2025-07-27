@@ -78,7 +78,7 @@ class DNSClient:
         )
 
         # Handle duration parameter (from CLI or config)
-        self.duration = getattr(self.config, "duration", None)
+        self.duration = self.config.duration  # always set from config (default 30s)
         if self.duration and self.duration > 0:
             self._duration_timer = threading.Timer(
                 self.duration, self._duration_timeout

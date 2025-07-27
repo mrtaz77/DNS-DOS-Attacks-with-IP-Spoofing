@@ -17,6 +17,7 @@ class ClientConfig:
         self.bind_port = None
         self.report_dir = None
         self.use_cookies = False
+        self.duration = 30  # default duration in seconds
 
     @classmethod
     def from_args(cls):
@@ -67,6 +68,12 @@ class ClientConfig:
             action="store_true",
             help="Use DNS Cookies (RFC 7873) for enhanced security",
         )
+        parser.add_argument(
+            "--duration",
+            type=float,
+            default=30,
+            help="How long to run the client (seconds, default: 30)",
+        )
 
         args = parser.parse_args()
 
@@ -82,6 +89,7 @@ class ClientConfig:
         config.bind_port = args.bind_port
         config.report_dir = args.report_dir
         config.use_cookies = args.use_cookies
+        config.duration = args.duration
 
         # Ensure log file directory exists
         log_path = Path(config.log)
