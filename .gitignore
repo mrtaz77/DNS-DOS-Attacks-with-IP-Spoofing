@@ -9,7 +9,7 @@
 *.fdb_latexmk
 *.json
 *.png
-
+*.zip
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]

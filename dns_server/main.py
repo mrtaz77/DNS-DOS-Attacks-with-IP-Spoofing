@@ -51,6 +51,12 @@ def main():
     parser.add_argument("--cache-size", type=int, default=10000, help="Maximum cache entries for LRU/hybrid cache")
     parser.add_argument("--redis-url", help="Redis URL for redis/hybrid cache (default: redis://localhost:6379/0)")
     
+    # DNS Cookie arguments for anti-spoofing protection
+    parser.add_argument("--cookie-required", action="store_true", default=False,
+                       help="Require DNS Cookies for all queries (RFC 7873) - drops requests without valid cookies")
+    parser.add_argument("--cookie-secret-lifetime", type=int, default=86400*30,
+                       help="DNS Cookie server secret lifetime in seconds (default: 30 days)")
+    
     args = parser.parse_args()
 
     # Handle both single forwarder and multiple forwarders
@@ -79,7 +85,9 @@ def main():
         rate_limit_ban_duration=args.rate_limit_ban_duration,
         cache_type=args.cache_type,
         cache_size=args.cache_size,
-        redis_url=args.redis_url
+        redis_url=args.redis_url,
+        cookie_required=args.cookie_required,
+        cookie_secret_lifetime=args.cookie_secret_lifetime
     )
 
     threads = []

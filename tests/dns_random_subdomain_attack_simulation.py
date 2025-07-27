@@ -35,6 +35,8 @@ class DNSSubdomainFloodSimulation:
         attack_threads=15,
         target_server_port=5353,
         server_ip="127.0.0.1",
+        server_cookie_required=False,
+        client_use_cookies=False,
     ):
         self.target_dns_process = None
         self.stop_event = threading.Event()
@@ -47,6 +49,10 @@ class DNSSubdomainFloodSimulation:
         # Attack configuration
         self.attack_duration = attack_duration
         self.attack_threads = attack_threads
+        
+        # DNS Cookie defense configuration
+        self.server_cookie_required = server_cookie_required
+        self.client_use_cookies = client_use_cookies
 
         # Simulation metrics
         self.metrics = {
@@ -110,7 +116,7 @@ class DNSSubdomainFloodSimulation:
                     "100",  # Some protection
                     "--rate-limit-window",
                     "10",
-                ],
+                ] + (["--cookie-required"] if self.server_cookie_required else []),
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 universal_newlines=True,
@@ -1030,6 +1036,18 @@ Examples:
     parser.add_argument(
         "--verbose", "-v", action="store_true", help="Enable verbose logging"
     )
+    parser.add_argument(
+        "--server-cookie-required", 
+        action="store_true", 
+        default=False,
+        help="Enable DNS Cookie defense on server (RFC 7873) - requires valid cookies"
+    )
+    parser.add_argument(
+        "--client-use-cookies", 
+        action="store_true", 
+        default=False,
+        help="Enable DNS Cookies in legitimate client for testing defense"
+    )
 
     args = parser.parse_args()
 
@@ -1073,6 +1091,8 @@ Examples:
         attack_threads=args.threads,
         target_server_port=args.target_port,
         server_ip=args.server_ip,
+        server_cookie_required=args.server_cookie_required,
+        client_use_cookies=args.client_use_cookies,
     )
 
     # Handle Ctrl+C gracefully
