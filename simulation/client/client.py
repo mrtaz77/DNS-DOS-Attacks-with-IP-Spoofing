@@ -69,8 +69,11 @@ class DNSClient:
         self.query_handler = DNSQueryHandler(
             self.file_logger,
             bind_ip=self.config.bind_ip,
-            bind_port=self.config.bind_port,  # fixed: use correct config property
+            bind_port=self.config.bind_port,
             use_cookies=self.config.use_cookies,
+            use_tls=self.config.use_tls,  # pass TLS flag
+            tls_certfile=self.config.tls_certfile,
+            tls_keyfile=self.config.tls_keyfile,
         )
         self.display = DisplayHandler(self.metrics, self.file_logger)
         self.plotting_engine = PlottingEngine(

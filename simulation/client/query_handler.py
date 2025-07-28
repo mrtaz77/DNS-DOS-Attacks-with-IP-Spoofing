@@ -2,18 +2,35 @@ import socket
 import struct
 import time
 import random
-from dns_cookies_client import DNSCookieClient, add_cookie_to_dns_query_raw, extract_cookie_from_response
+import ssl
+from dns_cookies_client import (
+    DNSCookieClient,
+    add_cookie_to_dns_query_raw,
+    extract_cookie_from_response,
+)
 
 
 class DNSQueryHandler:
     """DNS query execution and response handling using raw sockets"""
 
-    def __init__(self, file_logger, bind_ip=None, bind_port=None, use_cookies=False):
+    def __init__(
+        self,
+        file_logger,
+        bind_ip=None,
+        bind_port=None,
+        use_cookies=False,
+        use_tls=False,
+        tls_certfile=None,
+        tls_keyfile=None,
+    ):
         self.file_logger = file_logger
         self.bind_ip = bind_ip
         self.bind_port = bind_port
         self.use_cookies = use_cookies
         self.cookie_client = DNSCookieClient() if use_cookies else None
+        self.use_tls = use_tls
+        self.tls_certfile = tls_certfile
+        self.tls_keyfile = tls_keyfile
 
     def _build_dns_query(self, qname, qtype="A"):
         # Transaction ID: fixed 16-bit
@@ -296,11 +313,21 @@ class DNSQueryHandler:
         except Exception:
             return "HINFO:(parse error)"
 
+    def _recv_exact(self, sock, n):
+        """Helper to receive exactly n bytes from a socket."""
+        data = b""
+        while len(data) < n:
+            chunk = sock.recv(n - len(data))
+            if not chunk:
+                raise ConnectionError("Socket closed before receiving expected data")
+            data += chunk
+        return data
+
     def send_query(self, server_ip, server_port, qname, qtype, timeout=10):
         """Send DNS query using raw sockets (UDP only)"""
         try:
             query, txid = self._build_dns_query(qname, qtype)
-            
+
             # Add DNS Cookie if enabled
             if self.use_cookies and self.cookie_client:
                 client_cookie = self.cookie_client.get_client_cookie()
@@ -309,45 +336,70 @@ class DNSQueryHandler:
                 self.file_logger.debug(
                     f"DNS_QUERY_COOKIE - Added cookie to {qname} {qtype} query (client={client_cookie.hex()[:8]}..., server={'present' if server_cookie else 'none'})"
                 )
-            
+
             self.file_logger.debug(
                 f"DNS_QUERY - {qname} {qtype} to {server_ip}:{server_port}"
             )
             start = time.time()
-            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            sock.settimeout(timeout)
-            if self.bind_ip or self.bind_port:
-                sock.bind((self.bind_ip or "", self.bind_port or 0))
-            sock.sendto(query, (server_ip, server_port))
-            try:
-                data, _ = sock.recvfrom(4096)
-                elapsed = time.time() - start
-                # --- Measure parsing time ---
-                parse_start = time.time()
-                resp = self._parse_dns_response(data, txid)
-                parse_end = time.time()
-                parsing_time = parse_end - parse_start
-                
-                # Extract and store DNS Cookie from response if present
-                if self.use_cookies and self.cookie_client and resp.get("success"):
-                    _, server_cookie_resp = extract_cookie_from_response(data)
-                    if server_cookie_resp:
-                        self.cookie_client.store_server_cookie(server_ip, server_cookie_resp)
-                        self.file_logger.debug(f"DNS_COOKIE_STORED - Server cookie stored for {server_ip}")
-                # ---------------------------
-                resp["elapsed"] = elapsed
-                resp["parsing_time"] = parsing_time
-                return resp
-            except socket.timeout:
-                return {
-                    "success": False,
-                    "elapsed": timeout,
-                    "error": "TIMEOUT",
-                    "output": "DNS query timeout",
-                    "parsing_time": 0,
-                }
-            finally:
-                sock.close()
+            if self.use_tls:
+                context = ssl.create_default_context()
+                # Allow self-signed certs for local testing
+                context.check_hostname = False
+                context.verify_mode = ssl.CERT_NONE
+                if self.tls_certfile and self.tls_keyfile:
+                    context.load_cert_chain(
+                        certfile=self.tls_certfile, keyfile=self.tls_keyfile
+                    )
+                with socket.create_connection(
+                    (server_ip, server_port), timeout=timeout
+                ) as sock:
+                    with context.wrap_socket(
+                        sock, server_hostname=None
+                    ) as tls_sock:
+                        tls_sock.sendall(len(query).to_bytes(2, "big") + query)
+                        resp_len_bytes = self._recv_exact(tls_sock, 2)
+                        resp_len = int.from_bytes(resp_len_bytes, "big")
+                        response = self._recv_exact(tls_sock, resp_len)
+            else:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                sock.settimeout(timeout)
+                if self.bind_ip or self.bind_port:
+                    sock.bind((self.bind_ip or "", self.bind_port or 0))
+                sock.sendto(query, (server_ip, server_port))
+                try:
+                    data, _ = sock.recvfrom(4096)
+                    response = data
+                except socket.timeout:
+                    return {
+                        "success": False,
+                        "elapsed": timeout,
+                        "error": "TIMEOUT",
+                        "output": "DNS query timeout",
+                        "parsing_time": 0,
+                    }
+                finally:
+                    sock.close()
+
+            # --- Measure parsing time ---
+            parse_start = time.time()
+            resp = self._parse_dns_response(response, txid)
+            parse_end = time.time()
+            parsing_time = parse_end - parse_start
+
+            # Extract and store DNS Cookie from response if present
+            if self.use_cookies and self.cookie_client and resp.get("success"):
+                _, server_cookie_resp = extract_cookie_from_response(response)
+                if server_cookie_resp:
+                    self.cookie_client.store_server_cookie(
+                        server_ip, server_cookie_resp
+                    )
+                    self.file_logger.debug(
+                        f"DNS_COOKIE_STORED - Server cookie stored for {server_ip}"
+                    )
+            # ---------------------------
+            resp["elapsed"] = time.time() - start
+            resp["parsing_time"] = parsing_time
+            return resp
         except Exception as e:
             return {
                 "success": False,
