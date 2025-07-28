@@ -17,6 +17,10 @@ class ClientConfig:
         self.bind_port = None
         self.report_dir = None
         self.use_cookies = False
+        self.duration = 30  # default duration in seconds
+        self.use_tls = False
+        self.tls_certfile = None
+        self.tls_keyfile = None
 
     @classmethod
     def from_args(cls):
@@ -67,6 +71,29 @@ class ClientConfig:
             action="store_true",
             help="Use DNS Cookies (RFC 7873) for enhanced security",
         )
+        parser.add_argument(
+            "--duration",
+            type=float,
+            default=30,
+            help="How long to run the client (seconds, default: 30)",
+        )
+        parser.add_argument(
+            "--use-tls",
+            action="store_true",
+            help="Use DNS-over-TLS (DoT) for queries",
+        )
+        parser.add_argument(
+            "--tls-certfile",
+            type=str,
+            default=None,
+            help="TLS certificate file for client authentication (optional)",
+        )
+        parser.add_argument(
+            "--tls-keyfile",
+            type=str,
+            default=None,
+            help="TLS private key file for client authentication (optional)",
+        )
 
         args = parser.parse_args()
 
@@ -82,6 +109,10 @@ class ClientConfig:
         config.bind_port = args.bind_port
         config.report_dir = args.report_dir
         config.use_cookies = args.use_cookies
+        config.duration = args.duration
+        config.use_tls = args.use_tls
+        config.tls_certfile = args.tls_certfile
+        config.tls_keyfile = args.tls_keyfile
 
         # Ensure log file directory exists
         log_path = Path(config.log)
